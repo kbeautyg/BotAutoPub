@@ -1,164 +1,360 @@
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-from datetime import datetime, timedelta
+# scheduler.py
+
+import os
 import pytz
 import logging
+from datetime import datetime, timedelta
 
-from db_manager import DBManager
-from telegram_utils import send_post_to_channel
-import config
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.date import DateTrigger
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+from aiogram import Bot
+from aiogram.utils.exceptions import TelegramAPIError
 
-class Scheduler:
-    def __init__(self, bot, db_manager: DBManager):
-        self.scheduler = AsyncIOScheduler()
-        self.bot = bot
-        self.db_manager = db_manager
-        self.scheduler.start()
-        logging.info("Scheduler started.")
+from db import (
+    get_post,
+    mark_post_sent,
+    save_posted_message,
+    get_posted_messages,
+    delete_posted_messages_records,
+)
+from utils import to_utc, extract_cron_kwargs
 
-    async def _send_post_job(self, post_id: str):
-        """Job to send a post."""
-        logging.info(f"Attempting to send post {post_id}")
-        post = await self.db_manager.get_post(post_id)
-        if not post or post['status'] != 'scheduled':
-            logging.warning(f"Post {post_id} not found or not in 'scheduled' status. Skipping send.")
-            return
+# ============================
+# Логирование APScheduler
+# ============================
+logging.basicConfig()
+logging.getLogger('apscheduler').setLevel(logging.INFO)
 
-        media_files = await self.db_manager.get_post_media(post_id)
-        buttons_data = await self.db_manager.get_post_buttons(post_id)
-        post_channels_data = await self.db_manager.get_post_channels(post_id)
+# ============================
+# Переменные окружения
+# ============================
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+if not TELEGRAM_BOT_TOKEN:
+    raise RuntimeError("TELEGRAM_BOT_TOKEN не задан в окружении")
 
-        sent_messages = []
-        for pc_data in post_channels_data:
-            channel_info = pc_data['channels']
-            if channel_info:
-                try:
-                    message_obj = await send_post_to_channel(
-                        self.bot,
-                        channel_info['telegram_channel_id'],
-                        post['text'],
-                        media_files,
-                        buttons_data
-                    )
-                    if message_obj: # Check if message was actually sent and returned
-                        sent_messages.append({'channel_id': channel_info['id'], 'message_id': message_obj.message_id})
-                        logging.info(f"Post {post_id} sent to channel {channel_info['channel_name']} ({channel_info['telegram_channel_id']})")
-                    else:
-                        logging.warning(f"send_post_to_channel returned None for post {post_id} to channel {channel_info['channel_name']}.")
-                except Exception as e:
-                    logging.error(f"Failed to send post {post_id} to channel {channel_info['channel_name']}: {e}")
-        
-        if sent_messages:
-            await self.db_manager.update_post(post_id, {'status': 'sent'})
-            logging.info(f"Post {post_id} status updated to 'sent'.")
-            
-            # Schedule deletion if configured
-            if post['delete_after_publish_type'] != 'never':
-                delete_time = None
-                if post['delete_after_publish_type'] == 'hours':
-                    delete_time = datetime.now(pytz.utc) + timedelta(hours=post['delete_after_publish_value'])
-                elif post['delete_after_publish_type'] == 'days':
-                    delete_time = datetime.now(pytz.utc) + timedelta(days=post['delete_after_publish_value'])
-                elif post['delete_after_publish_type'] == 'specific_date':
-                    # Ensure delete_at is a datetime object, not string
-                    if isinstance(post['delete_at'], str):
-                        delete_time = datetime.fromisoformat(post['delete_at'])
-                    else:
-                        delete_time = post['delete_at']
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL должен быть задан для SQLAlchemyJobStore")
 
-                if delete_time:
-                    # IMPORTANT: sent_messages are not persisted across restarts for deletion jobs in this example.
-                    # A robust solution would store sent message IDs in the DB (e.g., in a new table linked to posts)
-                    # and retrieve them here. For this project, we acknowledge this limitation.
-                    self.add_one_time_job(
-                        job_func=self._delete_post_job,
-                        run_date=delete_time,
-                        args=[post_id, sent_messages], # sent_messages will be lost on restart
-                        job_id=f"delete_post_{post_id}_{delete_time.timestamp()}" # Unique ID for deletion job
-                    )
-                    logging.info(f"Deletion job for post {post_id} scheduled for {delete_time}.")
-        else:
-            logging.warning(f"Post {post_id} was not sent to any channel. Status remains 'scheduled'.")
+# ============================
+# Инициализация Telegram Bot и Scheduler
+# ============================
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
+jobstores = {
+    'default': SQLAlchemyJobStore(url=DATABASE_URL)
+}
+scheduler = AsyncIOScheduler(jobstores=jobstores, timezone=pytz.UTC)
+scheduler.start()
 
 
-    async def _delete_post_job(self, post_id: str, sent_messages: list):
-        """Job to delete a post from channels."""
-        logging.info(f"Attempting to delete post {post_id} from channels.")
-        if not sent_messages:
-            logging.warning(f"No sent_messages provided for deletion of post {post_id}. Cannot delete from channels.")
-            # In a robust system, we would fetch sent message IDs from DB here.
-            return
+# ----------------------------
+# Планирование «одноразовой» публикации
+# ----------------------------
+def schedule_one_time(post_id: str, run_date_utc: datetime) -> str:
+    """
+    Планирует одноразовый запуск publish_post(post_id) в UTC‐времени run_date_utc.
+    Возвращает job.id.
+    """
+    trigger = DateTrigger(run_date=run_date_utc, timezone=pytz.UTC)
+    job = scheduler.add_job(publish_post, trigger=trigger, args=[post_id], id=f"{post_id}_pub")
+    return job.id
 
-        for msg_info in sent_messages:
-            channel_db_info = await self.db_manager.get_channel_by_id(msg_info['channel_id'])
-            if channel_db_info:
-                try:
-                    await self.bot.delete_message(chat_id=channel_db_info['telegram_channel_id'], message_id=msg_info['message_id'])
-                    logging.info(f"Post {post_id} deleted from channel {channel_db_info['channel_name']}.")
-                except Exception as e:
-                    logging.error(f"Failed to delete message {msg_info['message_id']} from channel {channel_db_info['channel_name']}: {e}")
+
+# ----------------------------
+# Планирование «cron» (циклический) запуск
+# ----------------------------
+def schedule_cron(
+    post_id: str,
+    schedule_type: str,
+    time_str: str,
+    days=None,
+    day_of_month=None,
+    month_and_day=None,
+    start_date_local=None,
+    end_date_local=None,
+):
+    """
+    Создаёт CronTrigger для publish_post(post_id) по типу расписания:
+      - schedule_type: "daily", "weekly", "monthly", "yearly"
+      - time_str: "HH:MM"
+      - days: список сокращённых дней ['mon','wed'] (только для weekly)
+      - day_of_month: integer (только для monthly)
+      - month_and_day: (month:int, day:int) (только для yearly)
+      - start_date_local, end_date_local: локальные datetime-с tzinfo пользователя
+    Возвращает job.id.
+    """
+    cron_kwargs = extract_cron_kwargs(schedule_type, time_str, days, day_of_month, month_and_day)
+
+    utc_start = to_utc(start_date_local) if start_date_local else None
+    utc_end = to_utc(end_date_local) if end_date_local else None
+
+    trigger = CronTrigger(
+        timezone=pytz.UTC,
+        **cron_kwargs,
+        start_date=utc_start,
+        end_date=utc_end
+    )
+    job = scheduler.add_job(publish_post, trigger=trigger, args=[post_id], id=f"{post_id}_pub")
+    return job.id
+
+
+# ----------------------------
+# Планирование «одноразового» удаления
+# ----------------------------
+def schedule_delete(post_id: str, run_date_utc: datetime) -> str:
+    """
+    Планирует одноразовый запуск delete_post(post_id) в UTC‐времени run_date_utc.
+    Возвращает job.id.
+    """
+    trigger = DateTrigger(run_date=run_date_utc, timezone=pytz.UTC)
+    job = scheduler.add_job(delete_post, trigger=trigger, args=[post_id], id=f"{post_id}_del")
+    return job.id
+
+
+# ----------------------------
+# Удаление задачи (по её ID)
+# ----------------------------
+def remove_job(job_id: str) -> None:
+    """
+    Удаляет задачу из планировщика, если она там есть.
+    """
+    try:
+        scheduler.remove_job(job_id)
+    except Exception:
+        pass  # Если задачи нет или уже удалена, просто игнорируем
+
+
+# ----------------------------
+# Функция публикации поста
+# ----------------------------
+async def publish_post(post_id: str):
+    """
+    Берёт из БД post_id, извлекает:
+      - channels (список chat_id)
+      - text
+      - media_ids (список URL)
+      - buttons (список {"text":..., "url":...})
+      - delete_rule
+      - type_schedule (строка 'one_time' или 'cron')
+    Отправляет в каждый канал (media + text + кнопки).
+    Сохраняет в таблицу posted_messages каждую пару (channel_id, message_id).
+    Обновляет статус поста в 'sent'. Для циклов – обновляет next_run_at.
+    Если delete_rule лежит в БД, проставляет задачу на удаление.
+    """
+    post = get_post(post_id)
+    if not post:
+        return  # Пост удалён или не найден
+
+    channels = post.get("channels") or []
+    text = post.get("text") or ""
+    media_ids = post.get("media_ids") or []
+    buttons = post.get("buttons") or []
+    delete_rule = post.get("delete_rule") or {"type": "never"}
+    schedule_type = post.get("type_schedule")
+
+    posted_messages = []
+
+    # Формируем InlineKeyboard, если есть кнопки
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    keyboard = None
+    if buttons:
+        keyboard = InlineKeyboardMarkup(row_width=1)
+        for btn in buttons:
+            keyboard.add(InlineKeyboardButton(text=btn["text"], url=btn["url"]))
+
+    # Отправляем в каждый канал
+    for chat_id in channels:
+        try:
+            if media_ids:
+                # Если все медиа – изображения, и их >1, отправляем media_group
+                image_exts = {".jpg", ".jpeg", ".png", ".gif"}
+                if (len(media_ids) > 1
+                        and all(str(url).lower().endswith(tuple(image_exts)) for url in media_ids)):
+                    from aiogram.types import InputMediaPhoto
+                    media_group = [InputMediaPhoto(media=url) for url in media_ids]
+                    # Прикрепляем текст к первому элементу, если он есть
+                    if text:
+                        media_group[0].caption = text
+                        media_group[0].parse_mode = "HTML"
+                    sent_msgs = await bot.send_media_group(chat_id=int(chat_id), media=media_group)
+                    for msg in sent_msgs:
+                        posted_messages.append({
+                            "channel_id": int(chat_id),
+                            "message_id": msg.message_id
+                        })
+                    # Если есть кнопки, отправляем отдельно
+                    if keyboard:
+                        msg_btn = await bot.send_message(chat_id=int(chat_id), text=" ", reply_markup=keyboard)
+                        posted_messages.append({
+                            "channel_id": int(chat_id),
+                            "message_id": msg_btn.message_id
+                        })
+                else:
+                    # Отправляем каждое медиа по отдельности
+                    for idx, url in enumerate(media_ids):
+                        lower = str(url).lower()
+                        if lower.endswith((".jpg", ".jpeg", ".png", ".gif")):
+                            if idx == 0 and text:
+                                msg = await bot.send_photo(
+                                    chat_id=int(chat_id),
+                                    photo=url,
+                                    caption=text,
+                                    parse_mode="HTML",
+                                    reply_markup=(keyboard if not media_ids or idx != 0 else None)
+                                )
+                            else:
+                                msg = await bot.send_photo(chat_id=int(chat_id), photo=url)
+                            posted_messages.append({
+                                "channel_id": int(chat_id),
+                                "message_id": msg.message_id
+                            })
+                        elif lower.endswith(".mp4"):
+                            if idx == 0 and text:
+                                msg = await bot.send_video(
+                                    chat_id=int(chat_id),
+                                    video=url,
+                                    caption=text,
+                                    parse_mode="HTML"
+                                )
+                            else:
+                                msg = await bot.send_video(chat_id=int(chat_id), video=url)
+                            posted_messages.append({
+                                "channel_id": int(chat_id),
+                                "message_id": msg.message_id
+                            })
+                        elif lower.endswith(".pdf"):
+                            if idx == 0 and text:
+                                msg = await bot.send_document(
+                                    chat_id=int(chat_id),
+                                    document=url,
+                                    caption=text,
+                                    parse_mode="HTML"
+                                )
+                            else:
+                                msg = await bot.send_document(chat_id=int(chat_id), document=url)
+                            posted_messages.append({
+                                "channel_id": int(chat_id),
+                                "message_id": msg.message_id
+                            })
+                        else:
+                            # Попробуем как документ
+                            if idx == 0 and text:
+                                msg = await bot.send_document(
+                                    chat_id=int(chat_id),
+                                    document=url,
+                                    caption=text,
+                                    parse_mode="HTML"
+                                )
+                            else:
+                                msg = await bot.send_document(chat_id=int(chat_id), document=url)
+                            posted_messages.append({
+                                "channel_id": int(chat_id),
+                                "message_id": msg.message_id
+                            })
+                    # Если не было текста на первом медиа, но текст всё равно есть – отправляем отдельно
+                    if not media_ids and text:
+                        msg_text = await bot.send_message(
+                            chat_id=int(chat_id),
+                            text=text,
+                            parse_mode="HTML",
+                            reply_markup=keyboard
+                        )
+                        posted_messages.append({
+                            "channel_id": int(chat_id),
+                            "message_id": msg_text.message_id
+                        })
+                    elif media_ids and not text:
+                        # Если медиа было, но текста нет, а есть кнопки – отправим кнопки отдельно
+                        if keyboard:
+                            msg_btn = await bot.send_message(chat_id=int(chat_id), text=" ", reply_markup=keyboard)
+                            posted_messages.append({
+                                "channel_id": int(chat_id),
+                                "message_id": msg_btn.message_id
+                            })
             else:
-                logging.warning(f"Channel with ID {msg_info['channel_id']} not found for deletion of post {post_id}.")
-        
-        # Optionally, update post status to 'deleted' or similar in DB
-        # await self.db_manager.update_post(post_id, {'status': 'deleted'})
-        logging.info(f"Deletion process for post {post_id} completed.")
+                # Без медиа – просто текст + кнопки
+                if text:
+                    msg_text = await bot.send_message(
+                        chat_id=int(chat_id),
+                        text=text,
+                        parse_mode="HTML",
+                        reply_markup=keyboard
+                    )
+                    posted_messages.append({
+                        "channel_id": int(chat_id),
+                        "message_id": msg_text.message_id
+                    })
+        except TelegramAPIError as e:
+            logging.error(f"Ошибка при отправке в канал {chat_id}: {e}")
+
+    # Сохраняем все отправленные сообщения в БД и меняем статус поста на 'sent'
+    if posted_messages:
+        mark_post_sent(post_id, posted_messages)
+
+    # Обрабатываем правило удаления (delete_rule)
+    rule_type = delete_rule.get("type", "never")
+    if rule_type == "after_N":
+        seconds = delete_rule.get("value", 0)
+        if seconds > 0:
+            # Базовое время – one_time_ts_utc (если было) или now()
+            base = post.get("one_time_ts_utc")
+            if base:
+                try:
+                    base_dt = datetime.fromisoformat(base) if isinstance(base, str) else base
+                    base_utc = base_dt.astimezone(pytz.UTC)
+                except Exception:
+                    base_utc = datetime.now(pytz.UTC)
+            else:
+                base_utc = datetime.now(pytz.UTC)
+            run_date = base_utc + timedelta(seconds=seconds)
+            schedule_delete(post_id, run_date)
+
+    elif rule_type == "at_time":
+        ts = delete_rule.get("value")
+        if ts:
+            try:
+                run_date = datetime.fromisoformat(ts)
+                if run_date.tzinfo is None:
+                    run_date = pytz.UTC.localize(run_date)
+            except Exception:
+                run_date = None
+            if run_date and run_date > datetime.now(pytz.UTC):
+                schedule_delete(post_id, run_date)
+
+    # Если циклический пост (type_schedule != "one_time"), обновляем next_run_at
+    if schedule_type != "one_time":
+        job = scheduler.get_job(f"{post_id}_pub")
+        if job and job.next_run_time:
+            from db import supabase
+            supabase.table("posts").update({
+                "next_run_at": job.next_run_time
+            }).eq("id", post_id).execute()
 
 
-    def add_one_time_job(self, job_func, run_date: datetime, args: list = None, job_id: str = None):
-        """Adds a one-time job to the scheduler."""
-        if run_date < datetime.now(pytz.utc):
-            logging.warning(f"Attempted to schedule job {job_id} in the past. Skipping.")
-            return None
-        
-        job = self.scheduler.add_job(job_func, 'date', run_date=run_date, args=args, id=job_id)
-        logging.info(f"One-time job '{job_id}' scheduled for {run_date.isoformat()}")
-        return job
-
-    def add_recurring_job(self, job_func, cron_expression: str, args: list = None, job_id: str = None, start_date: datetime = None, end_date: datetime = None):
-        """Adds a recurring job to the scheduler using a cron expression."""
+# ----------------------------
+# Функция удаления опубликованного поста
+# ----------------------------
+async def delete_post(post_id: str):
+    """
+    Удаляет все сообщения, отправленные ранее в каналы (по posted_messages),
+    затем удаляет записи posted_messages и помечает одинарный пост как 'deleted'.
+    """
+    msgs = get_posted_messages(post_id)
+    for record in msgs:
+        chat_id = record.get("channel_id")
+        message_id = record.get("message_id")
         try:
-            trigger = CronTrigger.from_crontab(cron_expression, timezone=pytz.utc)
-            job = self.scheduler.add_job(job_func, trigger, args=args, id=job_id, start_date=start_date, end_date=end_date)
-            logging.info(f"Recurring job '{job_id}' scheduled with cron: '{cron_expression}' (start: {start_date}, end: {end_date})")
-            return job
-        except Exception as e:
-            logging.error(f"Failed to add recurring job {job_id} with cron '{cron_expression}': {e}")
-            return None
+            await bot.delete_message(chat_id=int(chat_id), message_id=int(message_id))
+        except TelegramAPIError as e:
+            logging.error(f"Не удалось удалить сообщение {message_id} в канале {chat_id}: {e}")
 
-    def remove_job(self, job_id: str):
-        """Removes a job from the scheduler."""
-        try:
-            self.scheduler.remove_job(job_id)
-            logging.info(f"Job '{job_id}' removed from scheduler.")
-            return True
-        except Exception as e:
-            logging.warning(f"Job '{job_id}' not found or could not be removed: {e}")
-            return False
+    delete_posted_messages_records(post_id)
 
-    async def load_existing_tasks(self):
-        """Loads active scheduled tasks from the database and adds them to the scheduler."""
-        logging.info("Loading existing scheduled tasks from DB...")
-        tasks = await self.db_manager.get_active_scheduled_tasks()
-        for task in tasks:
-            post_id = task['post_id']
-            job_id = f"{task['task_type']}_{task['id']}" # Unique job ID
-            
-            if task['task_type'] == 'send_post':
-                if task['scheduled_time']: # One-time send
-                    run_date = datetime.fromisoformat(task['scheduled_time'])
-                    self.add_one_time_job(self._send_post_job, run_date, args=[post_id], job_id=job_id)
-                elif task['cron_expression']: # Recurring send
-                    start_date = datetime.fromisoformat(task['posts']['start_date']) if task['posts']['start_date'] else None
-                    end_date = datetime.fromisoformat(task['posts']['end_date']) if task['posts']['end_date'] else None
-                    self.add_recurring_job(self._send_post_job, task['cron_expression'], args=[post_id], job_id=job_id, start_date=start_date, end_date=end_date)
-            elif task['task_type'] == 'delete_post':
-                if task['scheduled_time']: # One-time delete
-                    # As noted, sent_messages are not persisted. This job will likely fail to delete.
-                    # A robust solution needs to store sent_messages in DB.
-                    run_date = datetime.fromisoformat(task['scheduled_time'])
-                    self.add_one_time_job(self._delete_post_job, run_date, args=[post_id, []], job_id=job_id) # Empty list for sent_messages
-            
-        logging.info(f"Loaded {len(tasks)} active tasks.")
+    # Если одноразовый – пометим статус 'deleted'
+    post = get_post(post_id)
+    if post and post.get("type_schedule") == "one_time":
+        from db import supabase
+        supabase.table("posts").update({"status": "deleted"}).eq("id", post_id).execute()

@@ -1,5 +1,8 @@
-aiogram==3.x.x # Use the latest stable version of aiogram 3
-python-supabase==2.x.x # Use the latest stable version
-python-dotenv==1.x.x
-pytz==2024.x
-apscheduler==3.x.x
+aiogram~=3.0
+supabase-py~=1.0
+apscheduler~=3.10
+pytz~=2021.3
+python-dotenv~=1.0
+aiofiles~=23.1.0
+psycopg2-binary~=2.9.6
+SQLAlchemy~=1.4
