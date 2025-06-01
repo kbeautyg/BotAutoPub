@@ -1,0 +1,5 @@
+aiogram==3.x.x # Use the latest stable version of aiogram 3
+python-supabase==2.x.x # Use the latest stable version
+python-dotenv==1.x.x
+pytz==2024.x
+apscheduler==3.x.x
