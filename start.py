@@ -2,8 +2,8 @@ from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from storage import supabase_db
-from commands import TEXTS
+import supabase_db
+from __init__ import TEXTS
 
 router = Router()
 

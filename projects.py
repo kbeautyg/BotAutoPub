@@ -4,8 +4,8 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, C
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from states import NewProject
-from storage import supabase_db
-from commands import TEXTS
+import supabase_db
+from __init__ import TEXTS
 
 router = Router()
 

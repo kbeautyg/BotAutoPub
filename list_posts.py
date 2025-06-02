@@ -4,8 +4,8 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext   # <-- добавлен импорт
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from storage import supabase_db
-from commands import TEXTS
+import supabase_db
+from __init__ import TEXTS
 from commands.create_post import parse_time, format_example
 
 router = Router()

@@ -7,8 +7,8 @@ from aiogram.fsm.context import FSMContext
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from states import EditPost
-from storage import supabase_db
-from commands import TEXTS
+import supabase_db
+from __init__ import TEXTS
 
 router = Router()
 

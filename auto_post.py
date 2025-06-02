@@ -2,8 +2,8 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from storage import supabase_db
-from commands import TEXTS
+import supabase_db
+from __init__ import TEXTS
 import json
 
 async def start_scheduler(bot: Bot, check_interval: int = 5):
