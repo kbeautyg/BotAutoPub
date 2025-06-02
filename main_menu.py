@@ -2,7 +2,7 @@ from aiogram import Router, types, F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from storage import supabase_db
+import supabase_db
 
 router = Router()
 
