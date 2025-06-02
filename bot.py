@@ -77,7 +77,7 @@ class TelegramBot:
                 ],
                 WAITING_FOR_MEDIA: [
                     MessageHandler(
-                        (filters.PHOTO | filters.VIDEO | filters.DOCUMENT | 
+                        (filters.PHOTO | filters.VIDEO | filters.Document.ALL | 
                          filters.AUDIO | filters.VOICE | filters.ANIMATION) & ~filters.COMMAND,
                         PostConversationHandlers.handle_post_media
                     ),
@@ -477,7 +477,10 @@ class TelegramBot:
             self.scheduler.stop()
         
         if self.application:
-            await self.application.stop()
+            try:
+                await self.application.stop()
+            except RuntimeError:
+                pass  # Приложение уже остановлено
         
         logger.info("Бот остановлен")
 
