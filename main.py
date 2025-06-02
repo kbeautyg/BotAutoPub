@@ -52,12 +52,12 @@ dp.include_router(scheduled_posts.router)  # Управление отложен
 dp.include_router(settings_improved.router)  # Улучшенные настройки
 dp.include_router(projects.router)
 
-# Старые модули для совместимости
-dp.include_router(create_post.router)
+# Старые модули для совместимости (без конфликтующих команд)
+# dp.include_router(create_post.router)  # Конфликт с create_post_improved
 dp.include_router(edit_post.router)
-dp.include_router(list_posts.router)
+# dp.include_router(list_posts.router)  # Конфликт с scheduled_posts
 dp.include_router(delete_post.router)
-dp.include_router(settings.router)
+# dp.include_router(settings.router)  # Конфликт с settings_improved
 
 # Import and start the scheduler
 import auto_post
