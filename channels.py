@@ -256,7 +256,7 @@ async def check_admin_rights_all(callback: CallbackQuery, user: dict, lang: str)
     await callback.answer()
 
 # Обработка текстовых сообщений для добавления канала
-@router.message(F.text)
+@router.message(F.text & ~F.text.startswith('/'))
 async def handle_channel_input(message: Message, state: FSMContext):
     # Проверяем, ожидается ли ввод канала
     # Это упрощенная логика, в реальности нужно использовать FSM states
