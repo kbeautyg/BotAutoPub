@@ -1,238 +1,332 @@
-# utils.py
-
-import os
-import re
 import pytz
-from datetime import datetime
-from typing import Optional, List, Tuple
-from pathlib import Path
-import aiofiles
+from datetime import datetime, timedelta
+from typing import List, Dict, Optional, Tuple
+import re
+import json
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+import logging
 
-from aiogram import Bot, types
-from aiogram.types import ChatMember
+logger = logging.getLogger(__name__)
 
-# ----------------------------
-# Константы
-# ----------------------------
-MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 МБ
-ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.mp4', '.gif', '.pdf'}
+class TimeZoneManager:
+    """Менеджер часовых поясов"""
+    
+    COMMON_TIMEZONES = {
+        'UTC': 'UTC',
+        'Москва': 'Europe/Moscow',
+        'Киев': 'Europe/Kiev',
+        'Минск': 'Europe/Minsk',
+        'Алматы': 'Asia/Almaty',
+        'Ташкент': 'Asia/Tashkent',
+        'Баку': 'Asia/Baku',
+        'Ереван': 'Asia/Yerevan',
+        'Тбилиси': 'Asia/Tbilisi',
+        'Нью-Йорк': 'America/New_York',
+        'Лос-Анджелес': 'America/Los_Angeles',
+        'Лондон': 'Europe/London',
+        'Берлин': 'Europe/Berlin',
+        'Токио': 'Asia/Tokyo',
+        'Пекин': 'Asia/Shanghai'
+    }
+    
+    @classmethod
+    def get_timezone_keyboard(cls) -> InlineKeyboardMarkup:
+        """Создать клавиатуру с часовыми поясами"""
+        keyboard = []
+        for name, tz in cls.COMMON_TIMEZONES.items():
+            keyboard.append([InlineKeyboardButton(name, callback_data=f"tz_{tz}")])
+        
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_settings")])
+        return InlineKeyboardMarkup(keyboard)
+    
+    @classmethod
+    def convert_to_user_timezone(cls, utc_time: datetime, user_timezone: str) -> datetime:
+        """Конвертировать UTC время в пользовательский часовой пояс"""
+        try:
+            utc_tz = pytz.UTC
+            user_tz = pytz.timezone(user_timezone)
+            
+            if utc_time.tzinfo is None:
+                utc_time = utc_tz.localize(utc_time)
+            
+            return utc_time.astimezone(user_tz)
+        except Exception as e:
+            logger.error(f"Ошибка конвертации времени: {e}")
+            return utc_time
+    
+    @classmethod
+    def convert_to_utc(cls, local_time: datetime, user_timezone: str) -> datetime:
+        """Конвертировать локальное время в UTC"""
+        try:
+            user_tz = pytz.timezone(user_timezone)
+            
+            if local_time.tzinfo is None:
+                local_time = user_tz.localize(local_time)
+            
+            return local_time.astimezone(pytz.UTC)
+        except Exception as e:
+            logger.error(f"Ошибка конвертации в UTC: {e}")
+            return local_time
 
+class TextFormatter:
+    """Форматирование текста для Telegram"""
+    
+    @staticmethod
+    def escape_html(text: str) -> str:
+        """Экранировать HTML символы"""
+        if not text:
+            return ""
+        return (text.replace('&', '&amp;')
+                   .replace('<', '&lt;')
+                   .replace('>', '&gt;'))
+    
+    @staticmethod
+    def escape_markdown(text: str) -> str:
+        """Экранировать Markdown символы"""
+        if not text:
+            return ""
+        chars_to_escape = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        for char in chars_to_escape:
+            text = text.replace(char, f'\\{char}')
+        return text
+    
+    @staticmethod
+    def format_post_preview(text: str, media_type: str = None, 
+                          buttons: List[List[Dict]] = None, parse_mode: str = 'HTML') -> str:
+        """Создать превью поста"""
+        preview = "📝 <b>Превью поста:</b>\n\n"
+        
+        if media_type:
+            media_icons = {
+                'photo': '🖼️',
+                'video': '🎥',
+                'document': '📄',
+                'audio': '🎵',
+                'voice': '🎤',
+                'animation': '🎬'
+            }
+            preview += f"{media_icons.get(media_type, '📎')} <i>Медиа: {media_type}</i>\n\n"
+        
+        if text:
+            preview += f"<b>Текст:</b>\n{text[:500]}{'...' if len(text) > 500 else ''}\n\n"
+        
+        if buttons:
+            preview += "<b>Кнопки:</b>\n"
+            for row in buttons:
+                row_text = " | ".join([btn.get('text', 'Кнопка') for btn in row])
+                preview += f"• {row_text}\n"
+            preview += "\n"
+        
+        preview += f"<b>Форматирование:</b> {parse_mode}"
+        
+        return preview
 
-# ----------------------------
-# Проверка валидности таймзоны
-# ----------------------------
-def is_valid_timezone(tz_str: str) -> bool:
-    return tz_str in pytz.all_timezones
+class ButtonManager:
+    """Менеджер кнопок для постов"""
+    
+    @staticmethod
+    def parse_buttons_text(text: str) -> List[List[Dict]]:
+        """Парсинг текста кнопок в формат для Telegram"""
+        if not text.strip():
+            return []
+        
+        buttons = []
+        lines = text.strip().split('\n')
+        
+        for line in lines:
+            if not line.strip():
+                continue
+            
+            row = []
+            # Формат: "Текст кнопки - ссылка" или "Текст кнопки | Текст кнопки 2 - ссылка"
+            if '|' in line:
+                # Несколько кнопок в ряду
+                button_parts = line.split('|')
+                for part in button_parts:
+                    part = part.strip()
+                    if ' - ' in part:
+                        text, url = part.split(' - ', 1)
+                        row.append({'text': text.strip(), 'url': url.strip()})
+                    else:
+                        row.append({'text': part, 'url': '#'})
+            else:
+                # Одна кнопка в ряду
+                if ' - ' in line:
+                    text, url = line.split(' - ', 1)
+                    row.append({'text': text.strip(), 'url': url.strip()})
+                else:
+                    row.append({'text': line.strip(), 'url': '#'})
+            
+            if row:
+                buttons.append(row)
+        
+        return buttons
+    
+    @staticmethod
+    def create_inline_keyboard(buttons: List[List[Dict]]) -> Optional[InlineKeyboardMarkup]:
+        """Создать InlineKeyboardMarkup из списка кнопок"""
+        if not buttons:
+            return None
+        
+        keyboard = []
+        for row in buttons:
+            keyboard_row = []
+            for button in row:
+                text = button.get('text', 'Кнопка')
+                url = button.get('url', '#')
+                
+                if url and url != '#':
+                    keyboard_row.append(InlineKeyboardButton(text, url=url))
+                else:
+                    # Если нет URL, создаем callback кнопку
+                    keyboard_row.append(InlineKeyboardButton(text, callback_data=f"btn_{text}"))
+            
+            if keyboard_row:
+                keyboard.append(keyboard_row)
+        
+        return InlineKeyboardMarkup(keyboard) if keyboard else None
 
-
-# ----------------------------
-# Парсинг локальной даты "ДД.ММ.ГГГГ ЧЧ:ММ"
-# ----------------------------
-def parse_datetime_local(text: str, tz_str: str) -> Optional[datetime]:
-    """
-    Парсит строку "ДД.MM.YYYY HH:MM" в локальный datetime с tzinfo=tz_str.
-    Если формат неверный или tz_str некорректен, возвращает None.
-    """
-    try:
-        dt_naive = datetime.strptime(text, "%d.%m.%Y %H:%M")
-    except ValueError:
+class DateTimeParser:
+    """Парсер даты и времени"""
+    
+    @staticmethod
+    def parse_datetime_input(text: str, user_timezone: str = 'UTC') -> Optional[datetime]:
+        """Парсинг ввода даты и времени"""
+        text = text.strip().lower()
+        
+        try:
+            # Попробуем разные форматы
+            formats = [
+                '%d.%m.%Y %H:%M',
+                '%d.%m.%y %H:%M',
+                '%d/%m/%Y %H:%M',
+                '%d/%m/%y %H:%M',
+                '%Y-%m-%d %H:%M',
+                '%d.%m %H:%M',
+                '%d/%m %H:%M',
+                '%H:%M'
+            ]
+            
+            now = datetime.now()
+            user_tz = pytz.timezone(user_timezone)
+            
+            for fmt in formats:
+                try:
+                    if fmt == '%H:%M':
+                        # Только время - используем сегодняшнюю дату
+                        parsed_time = datetime.strptime(text, fmt).time()
+                        parsed_dt = datetime.combine(now.date(), parsed_time)
+                        
+                        # Если время уже прошло сегодня, планируем на завтра
+                        if parsed_dt <= now:
+                            parsed_dt += timedelta(days=1)
+                    
+                    elif fmt in ['%d.%m %H:%M', '%d/%m %H:%M']:
+                        # Дата без года - используем текущий год
+                        parsed_dt = datetime.strptime(f"{text} {now.year}", f"{fmt} %Y")
+                        
+                        # Если дата уже прошла в этом году, используем следующий год
+                        if parsed_dt <= now:
+                            parsed_dt = parsed_dt.replace(year=now.year + 1)
+                    
+                    else:
+                        parsed_dt = datetime.strptime(text, fmt)
+                    
+                    # Локализуем время в пользовательском часовом поясе
+                    if parsed_dt.tzinfo is None:
+                        parsed_dt = user_tz.localize(parsed_dt)
+                    
+                    # Конвертируем в UTC
+                    return parsed_dt.astimezone(pytz.UTC)
+                
+                except ValueError:
+                    continue
+            
+            # Попробуем относительные форматы
+            relative_patterns = {
+                r'через (\d+) мин': lambda m: now + timedelta(minutes=int(m.group(1))),
+                r'через (\d+) час': lambda m: now + timedelta(hours=int(m.group(1))),
+                r'через (\d+) дн': lambda m: now + timedelta(days=int(m.group(1))),
+                r'завтра в (\d{1,2}):(\d{2})': lambda m: (now + timedelta(days=1)).replace(
+                    hour=int(m.group(1)), minute=int(m.group(2)), second=0, microsecond=0
+                ),
+                r'сегодня в (\d{1,2}):(\d{2})': lambda m: now.replace(
+                    hour=int(m.group(1)), minute=int(m.group(2)), second=0, microsecond=0
+                )
+            }
+            
+            for pattern, func in relative_patterns.items():
+                match = re.search(pattern, text)
+                if match:
+                    result_dt = func(match)
+                    # Локализуем и конвертируем в UTC
+                    if result_dt.tzinfo is None:
+                        result_dt = user_tz.localize(result_dt)
+                    return result_dt.astimezone(pytz.UTC)
+            
+        except Exception as e:
+            logger.error(f"Ошибка парсинга даты/времени '{text}': {e}")
+        
         return None
+    
+    @staticmethod
+    def format_datetime(dt: datetime, user_timezone: str = 'UTC', 
+                       include_seconds: bool = False) -> str:
+        """Форматирование даты и времени для отображения"""
+        try:
+            # Конвертируем в пользовательский часовой пояс
+            user_dt = TimeZoneManager.convert_to_user_timezone(dt, user_timezone)
+            
+            fmt = '%d.%m.%Y %H:%M'
+            if include_seconds:
+                fmt += ':%S'
+            
+            return user_dt.strftime(fmt)
+        except Exception as e:
+            logger.error(f"Ошибка форматирования даты: {e}")
+            return str(dt)
 
-    try:
-        tz = pytz.timezone(tz_str)
-    except pytz.UnknownTimeZoneError:
-        return None
-
-    dt_local = tz.localize(dt_naive)
-    return dt_local
-
-
-# ----------------------------
-# Конвертация локального datetime → UTC
-# ----------------------------
-def to_utc(dt_local: datetime) -> datetime:
-    """
-    Переводит локальный datetime (с tzinfo) в UTC.
-    """
-    return dt_local.astimezone(pytz.UTC)
-
-
-# ----------------------------
-# Проверка, что локальный datetime уже в будущем
-# ----------------------------
-def is_future_datetime(dt_local: datetime) -> bool:
-    """
-    Сравнивает dt_local (с tzinfo) с текущим моментом в той же TZ.
-    """
-    now_local = datetime.now(pytz.timezone(dt_local.tzinfo.zone))
-    return dt_local > now_local
-
-
-# ----------------------------
-# Проверка валидности медиа (photo, video, document)
-# ----------------------------
-def validate_media(message: types.Message) -> bool:
-    """
-    Проверяет, что сообщение содержит photo/video/document, 
-    размер ≤20 МБ, расширение допустимо.
-    """
-    # Фото
-    if message.photo:
-        largest_photo = message.photo[-1]
-        return bool(largest_photo.file_size and largest_photo.file_size <= MAX_FILE_SIZE)
-
-    # Видео
-    if message.video:
-        video = message.video
-        if video.file_size and video.file_size <= MAX_FILE_SIZE:
-            ext = os.path.splitext(video.file_name or "")[1].lower()
-            return (ext in ALLOWED_EXTENSIONS) or (video.file_name is None)
-        return False
-
-    # Документы (pdf, gif и т. д.)
-    if message.document:
-        doc = message.document
-        if doc.file_size and doc.file_size <= MAX_FILE_SIZE:
-            ext = os.path.splitext(doc.file_name or "")[1].lower()
-            return ext in ALLOWED_EXTENSIONS
-        return False
-
-    return False  # Если нет подходящего медиа
-
-
-# ----------------------------
-# Асинхронная проверка, что пользователь и бот администраторы в канале
-# ----------------------------
-async def check_admin_rights(bot: Bot, chat_id: int, user_id: int) -> bool:
-    """
-    Проверяет через get_chat_member, что пользователь имеет статус administrator или creator,
-    и бот тоже – и имеет право post сообщений (can_post_messages) в этом канале.
-    """
-    try:
-        member_user: ChatMember = await bot.get_chat_member(chat_id, user_id)
-        member_bot: ChatMember = await bot.get_chat_member(chat_id, (await bot.get_me()).id)
-
-        # Проверяем статус пользователя
-        if member_user.status not in {"administrator", "creator"}:
-            return False
-
-        # Проверяем статус бота
-        if member_bot.status not in {"administrator", "creator"}:
-            return False
-
-        # Если есть атрибут can_post_messages у бота, проверяем, что он True
-        if hasattr(member_bot, "can_post_messages") and member_bot.can_post_messages is False:
-            return False
-
-        return True
-    except Exception:
-        return False
-
-
-# ----------------------------
-# Локальное хранилище медиа: папка media/<post_id>/
-# ----------------------------
-def ensure_media_dir(post_id: str) -> Path:
-    """
-    Создаёт (если нужно) папку media/<post_id>/ и возвращает Path к ней.
-    """
-    base_dir = Path("media") / post_id
-    base_dir.mkdir(parents=True, exist_ok=True)
-    return base_dir
-
-
-async def save_file_locally(message: types.Message, post_id: str) -> Optional[str]:
-    """
-    Скачивает файл из Telegram и сохраняет в папку media/<post_id>/. 
-    Возвращает путь к сохранённому файлу или None, если не удалось.
-    """
-    file_id = None
-    original_filename = None
-
-    if message.photo:
-        file_id = message.photo[-1].file_id
-        original_filename = f"{file_id}.jpg"
-    elif message.video:
-        file_id = message.video.file_id
-        original_filename = message.video.file_name or f"{file_id}.mp4"
-    elif message.document:
-        file_id = message.document.file_id
-        original_filename = message.document.file_name
+def create_main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
+    """Создать главное меню"""
+    keyboard = []
+    
+    if is_admin:
+        keyboard.extend([
+            [InlineKeyboardButton("📝 Создать пост", callback_data="create_post")],
+            [InlineKeyboardButton("📋 Отложенные посты", callback_data="scheduled_posts")],
+            [InlineKeyboardButton("📺 Управление каналами", callback_data="manage_channels")],
+            [InlineKeyboardButton("⚙️ Настройки", callback_data="settings")],
+            [InlineKeyboardButton("📊 Статистика", callback_data="statistics")]
+        ])
     else:
-        return None
+        keyboard.extend([
+            [InlineKeyboardButton("ℹ️ Информация", callback_data="info")],
+            [InlineKeyboardButton("⚙️ Настройки", callback_data="settings")]
+        ])
+    
+    return InlineKeyboardMarkup(keyboard)
 
-    if not file_id or not original_filename:
-        return None
+def create_back_button(callback_data: str = "main_menu") -> InlineKeyboardMarkup:
+    """Создать кнопку назад"""
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data=callback_data)]])
 
-    file_obj = await message.bot.get_file(file_id)
-    file_path = file_obj.file_path
-    file_bytes = await message.bot.download_file(file_path)
+def create_cancel_button() -> InlineKeyboardMarkup:
+    """Создать кнопку отмены"""
+    return InlineKeyboardMarkup([[InlineKeyboardButton("❌ Отменить", callback_data="cancel")]])
 
-    dir_path = ensure_media_dir(post_id)
-    save_path = dir_path / original_filename
+def truncate_text(text: str, max_length: int = 100) -> str:
+    """Обрезать текст до указанной длины"""
+    if len(text) <= max_length:
+        return text
+    return text[:max_length-3] + "..."
 
-    async with aiofiles.open(save_path, mode="wb") as f:
-        await f.write(file_bytes.read())
-
-    return str(save_path)
-
-
-def upload_media_for_post(post_id: str) -> List[str]:
-    """
-    Загружает все файлы из media/<post_id>/ в Supabase Storage (бакет 'media').
-    Возвращает список public URL для каждого файла.
-    """
-    from db import supabase
-
-    dir_path = ensure_media_dir(post_id)
-    uploaded_paths: List[str] = []
-
-    for file_path in dir_path.iterdir():
-        if file_path.is_file():
-            key = f"{post_id}/{file_path.name}"
-            with open(file_path, "rb") as file_data:
-                supabase.storage.from_("media").upload(key, file_data)
-                public_url = supabase.storage.from_("media").get_public_url(key).get("publicURL")
-                uploaded_paths.append(public_url)
-
-    return uploaded_paths
-
-
-# ----------------------------
-# Формирование kwargs для CronTrigger
-# ----------------------------
-def extract_cron_kwargs(
-    schedule_type: str,
-    time_str: str,
-    days: Optional[List[str]] = None,
-    day_of_month: Optional[int] = None,
-    month_and_day: Optional[Tuple[int, int]] = None
-) -> dict:
-    """
-    Формирует словарь для CronTrigger:
-      - daily: time_str = 'HH:MM'
-      - weekly: days = ['mon','wed'], time_str='HH:MM'
-      - monthly: day_of_month=15, time_str='HH:MM'
-      - yearly: month_and_day=(12,25), time_str='HH:MM'
-    """
-    hh, mm = map(int, time_str.split(":"))
-    cron_kwargs = {"hour": hh, "minute": mm}
-
-    if schedule_type == "daily":
-        return cron_kwargs
-
-    if schedule_type == "weekly":
-        cron_kwargs["day_of_week"] = ",".join(days or [])
-        return cron_kwargs
-
-    if schedule_type == "monthly":
-        cron_kwargs["day"] = day_of_month
-        return cron_kwargs
-
-    if schedule_type == "yearly":
-        month, day = month_and_day or (None, None)
-        cron_kwargs["month"] = month
-        cron_kwargs["day"] = day
-        return cron_kwargs
-
-    return cron_kwargs
+def validate_url(url: str) -> bool:
+    """Проверить валидность URL"""
+    url_pattern = re.compile(
+        r'^https?://'  # http:// or https://
+        r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|'  # domain...
+        r'localhost|'  # localhost...
+        r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # ...or ip
+        r'(?::\d+)?'  # optional port
+        r'(?:/?|[/?]\S+)$', re.IGNORECASE)
+    return url_pattern.match(url) is not None
