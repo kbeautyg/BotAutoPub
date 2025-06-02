@@ -1,7 +1,8 @@
-python-telegram-bot==20.7
-supabase==2.3.4
-python-dotenv==1.0.0
-pytz==2023.3
-aiofiles==23.2.1
-Pillow==10.1.0
-requests==2.31.0
+# requirements.txt
+aiogram>=3.0,<4.0
+supabase>=2.0,<3.0
+python-dotenv>=1.0.0
+asyncio-mqtt>=0.16.0
+schedule>=1.2.0
+pytz>=2023.3
+zoneinfo-backport>=0.2.1; python_version<"3.9"
