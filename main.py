@@ -36,11 +36,11 @@ import scheduled_posts
 import settings_improved
 
 # Старые модули (для совместимости)
-import create_post
+# import create_post
 import edit_post
-import list_posts
+# import list_posts
 import delete_post
-import settings
+# import settings
 
 # Регистрируем роутеры
 dp.include_router(start.router)
