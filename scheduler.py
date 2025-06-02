@@ -40,14 +40,22 @@ class PostScheduler:
         """Основной цикл планировщика"""
         while self.running:
             try:
-                # Создаем новый event loop для этого потока
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
+                # Проверяем, есть ли уже event loop
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_closed():
+                        raise RuntimeError("Loop is closed")
+                except RuntimeError:
+                    # Создаем новый event loop для этого потока
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
                 
                 # Выполняем проверку и публикацию постов
-                loop.run_until_complete(self._check_and_publish_posts())
-                
-                loop.close()
+                if not loop.is_running():
+                    loop.run_until_complete(self._check_and_publish_posts())
+                else:
+                    # Если loop уже запущен, создаем задачу
+                    asyncio.create_task(self._check_and_publish_posts())
                 
             except Exception as e:
                 logger.error(f"Ошибка в планировщике: {e}")

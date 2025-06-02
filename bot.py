@@ -70,6 +70,7 @@ class TelegramBot:
                 CallbackQueryHandler(PostHandlers.select_channel_for_post, pattern="^select_channel_"),
                 CommandHandler("post", PostHandlers.create_post_start)
             ],
+            per_message=True,
             states={
                 WAITING_FOR_TEXT: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, PostConversationHandlers.handle_post_text),
@@ -109,6 +110,7 @@ class TelegramBot:
             entry_points=[
                 CallbackQueryHandler(ChannelHandlers.add_channel_start, pattern="^add_channel$")
             ],
+            per_message=True,
             states={
                 WAITING_FOR_CHANNEL_ID: [
                     MessageHandler(
