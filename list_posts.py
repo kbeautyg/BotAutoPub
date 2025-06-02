@@ -6,7 +6,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import supabase_db
 from __init__ import TEXTS
-from commands.create_post import parse_time, format_example
+from create_post import parse_time, format_example
 
 router = Router()
 
