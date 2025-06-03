@@ -249,11 +249,7 @@ async def check_admin_rights_all(callback: CallbackQuery, user: dict, lang: str)
     
     text = "🔄 **Результаты проверки прав:**\n\n" + "\n".join(results)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Назад", callback_data=f"channel_manage:{channel_id}")]
-    ])
-    
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
-    await callback.answer()ад", callback_data="channels_menu")]
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="channels_menu")]
     ])
     
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
@@ -525,4 +521,8 @@ async def show_channel_posts(callback: CallbackQuery):
             text += f"\n... и еще {len(posts) - 10} постов"
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Наз
+        [InlineKeyboardButton(text="🔙 Назад", callback_data=f"channel_manage:{channel_id}")]
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+    await callback.answer()
