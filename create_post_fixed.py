@@ -1035,7 +1035,13 @@ async def handle_edit_menu_text(message: Message, state: FSMContext, is_callback
         await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
 
 # Обработчик текстовых команд редактирования (только в режиме редактирования)
-@router.message(PostCreationFlow.step_preview, F.text & lambda message: message.text.lower().strip() in ["text", "media", "format", "buttons", "time", "channel"])
+async def edit_commands_filter(message):
+    """Фильтр для команд редактирования"""
+    if not message.text:
+        return False
+    return message.text.lower().strip() in ["text", "media", "format", "buttons", "time", "channel"]
+
+@router.message(PostCreationFlow.step_preview, F.text, edit_commands_filter)
 async def handle_edit_field_text_specific(message: Message, state: FSMContext):
     """Обработка текстовых команд редактирования"""
     data = await state.get_data()
