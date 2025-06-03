@@ -940,64 +940,97 @@ async def handle_post_confirmation(callback: CallbackQuery, state: FSMContext):
 
 async def handle_post_confirmation_text(message: Message, state: FSMContext, is_callback: bool = False):
     """Подтверждение создания поста"""
-    user = supabase_db.db.get_user(message.from_user.id)
-    lang = user.get("language", "ru") if user else "ru"
-    
-    data = await state.get_data()
-    
-    # Подготовка данных для сохранения
-    post_data = {
-        "user_id": data["user_id"],
-        "project_id": data["project_id"],
-        "channel_id": data["channel_id"],
-        "text": data.get("text"),
-        "media_type": data.get("media_type"),
-        "media_id": data.get("media_file_id"),
-        "format": data.get("parse_mode"),
-        "buttons": data.get("buttons"),
-        "publish_time": data.get("publish_time").isoformat() if isinstance(data.get("publish_time"), datetime) else data.get("publish_time"),
-        "repeat_interval": data.get("repeat_interval"),
-        "draft": data.get("draft", False),
-        "published": False
-    }
-    
-    post = supabase_db.db.add_post(post_data)
-    
-    if post:
-        if data.get("draft"):
-            status_text = "📝 **Черновик сохранен**"
-        elif data.get("publish_time"):
-            status_text = "⏰ **Пост запланирован**"
-        else:
-            status_text = "🚀 **Пост будет опубликован**"
+    try:
+        data = await state.get_data()
+        user = supabase_db.db.get_user(data.get("user_id"))
+        lang = user.get("language", "ru") if user else "ru"
         
-        response_text = (
-            f"{status_text}\n\n"
-            f"**ID поста:** #{post['id']}\n\n"
-            f"✅ Пост создан успешно!\n\n"
-            f"**Команды для управления:**\n"
-            f"• `/view {post['id']}` - просмотр\n"
-            f"• `/edit {post['id']}` - редактировать\n"
-            f"• `/delete {post['id']}` - удалить\n"
-            f"• `/list` - список всех постов"
-        )
+        # Подготовка данных для сохранения
+        post_data = {
+            "user_id": data["user_id"],
+            "project_id": data["project_id"],
+            "channel_id": data["channel_id"],
+            "text": data.get("text"),
+            "media_type": data.get("media_type"),
+            "media_id": data.get("media_file_id"),
+            "format": data.get("parse_mode"),
+            "buttons": data.get("buttons"),
+            "repeat_interval": data.get("repeat_interval"),
+            "draft": data.get("draft", False),
+            "published": False
+        }
         
-        if is_callback:
-            await message.edit_text(response_text, parse_mode="Markdown")
+        # Безопасная обработка времени публикации
+        publish_time = data.get("publish_time")
+        if publish_time:
+            if isinstance(publish_time, datetime):
+                post_data["publish_time"] = publish_time.isoformat()
+            else:
+                post_data["publish_time"] = str(publish_time)
         else:
-            await message.answer(response_text, parse_mode="Markdown")
-    else:
+            post_data["publish_time"] = None
+        
+        print(f"Создание поста: {post_data}")  # Логирование для отладки
+        
+        # Создаем пост
+        post = supabase_db.db.add_post(post_data)
+        
+        if post:
+            if data.get("draft"):
+                status_text = "📝 **Черновик сохранен**"
+            elif data.get("publish_time"):
+                status_text = "⏰ **Пост запланирован**"
+            else:
+                status_text = "🚀 **Пост будет опубликован**"
+            
+            response_text = (
+                f"{status_text}\n\n"
+                f"**ID поста:** #{post['id']}\n\n"
+                f"✅ Пост создан успешно!\n\n"
+                f"**Команды для управления:**\n"
+                f"• `/view {post['id']}` - просмотр\n"
+                f"• `/edit {post['id']}` - редактировать\n"
+                f"• `/delete {post['id']}` - удалить\n"
+                f"• `/list` - список всех постов"
+            )
+            
+            if is_callback:
+                await message.edit_text(response_text, parse_mode="Markdown")
+            else:
+                await message.answer(response_text, parse_mode="Markdown")
+                
+        else:
+            error_text = (
+                "❌ **Ошибка создания поста**\n\n"
+                "Попробуйте еще раз или обратитесь к администратору."
+            )
+            
+            if is_callback:
+                await message.edit_text(error_text, parse_mode="Markdown")
+            else:
+                await message.answer(error_text, parse_mode="Markdown")
+        
+        await state.clear()
+        
+    except Exception as e:
+        print(f"Ошибка при создании поста: {e}")  # Логирование ошибки
+        
         error_text = (
-            "❌ **Ошибка создания поста**\n\n"
-            "Попробуйте еще раз или обратитесь к администратору."
+            f"❌ **Ошибка создания поста**\n\n"
+            f"Техническая ошибка: {str(e)}\n\n"
+            f"Попробуйте еще раз."
         )
         
-        if is_callback:
-            await message.edit_text(error_text, parse_mode="Markdown")
-        else:
-            await message.answer(error_text, parse_mode="Markdown")
-    
-    await state.clear()
+        try:
+            if is_callback:
+                await message.edit_text(error_text, parse_mode="Markdown")
+            else:
+                await message.answer(error_text, parse_mode="Markdown")
+        except:
+            # Если не удается отправить сообщение об ошибке
+            pass
+        
+        await state.clear()
 
 @router.callback_query(F.data == "post_edit_menu")
 async def handle_edit_menu(callback: CallbackQuery, state: FSMContext):
