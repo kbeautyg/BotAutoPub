@@ -18,6 +18,61 @@ def get_channels_main_menu(lang: str):
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
 
+@router.message(Command("debug_channel"))
+async def debug_channel_info(message: Message):
+    """Отладочная команда для проверки информации о канале"""
+    args = message.text.split()[1:]
+    if not args:
+        await message.answer("Использование: /debug_channel @channel_username или /debug_channel -100123456789")
+        return
+    
+    identifier = args[0]
+    
+    try:
+        # Получаем информацию о чате
+        if identifier.startswith("@"):
+            chat = await message.bot.get_chat(identifier)
+        else:
+            chat_id = int(identifier)
+            chat = await message.bot.get_chat(chat_id)
+        
+        info_text = f"🔍 **Информация о канале**\n\n"
+        info_text += f"**ID:** `{chat.id}`\n"
+        info_text += f"**Тип:** {chat.type}\n"
+        info_text += f"**Название:** {chat.title or 'Не указано'}\n"
+        info_text += f"**Username:** @{chat.username or 'Не указан'}\n"
+        info_text += f"**Описание:** {chat.description[:100] if chat.description else 'Не указано'}...\n\n"
+        
+        # Проверяем статус пользователя
+        try:
+            user_member = await message.bot.get_chat_member(chat.id, message.from_user.id)
+            info_text += f"**Ваш статус:** {user_member.status}\n"
+            info_text += f"**Вы админ:** {'✅ Да' if user_member.status in ['administrator', 'creator'] else '❌ Нет'}\n"
+        except Exception as e:
+            info_text += f"**Ваш статус:** ❌ Ошибка получения ({str(e)})\n"
+            
+            # Пробуем через список администраторов
+            try:
+                admins = await message.bot.get_chat_administrators(chat.id)
+                user_is_admin = any(admin.user.id == message.from_user.id for admin in admins)
+                info_text += f"**Через список админов:** {'✅ Да' if user_is_admin else '❌ Нет'}\n"
+                info_text += f"**Всего админов:** {len(admins)}\n"
+            except Exception as e2:
+                info_text += f"**Список админов:** ❌ Ошибка ({str(e2)})\n"
+        
+        # Проверяем статус бота
+        try:
+            bot_member = await message.bot.get_chat_member(chat.id, message.bot.id)
+            info_text += f"**Статус бота:** {bot_member.status}\n"
+            info_text += f"**Бот админ:** {'✅ Да' if bot_member.status in ['administrator', 'creator'] else '❌ Нет'}\n"
+        except Exception as e:
+            info_text += f"**Статус бота:** ❌ Ошибка ({str(e)})\n"
+        
+        await message.answer(info_text, parse_mode="Markdown")
+        
+    except Exception as e:
+        await message.answer(f"❌ **Ошибка:** {str(e)}", parse_mode="Markdown")
+
 @router.message(Command("channels"))
 async def cmd_channels(message: Message, state: FSMContext):
     user_id = message.from_user.id
