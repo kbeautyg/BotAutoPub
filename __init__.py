@@ -1,248 +1,197 @@
+# Texts for bot messages
 TEXTS = {
-    'ru': {
-        'start_welcome': "Привет! Я бот для отложенного постинга.\nИспользуйте /help для списка команд.",
-        'help': ("Команды:\n"
-                 "/create – создать пост\n"
-                 "/list – список отложенных постов\n"
-                 "/view <ID> – просмотреть пост\n"
-                 "/edit <ID> – редактировать пост\n"
-                 "/reschedule <ID> <дата/время> – перенести время публикации\n"
-                 "/delete <ID> – удалить пост\n"
-                 "/channels – управление каналами\n"
-                 "/project – проекты (смена/создание)\n"
-                 "/settings – настройки пользователя\n"
-                 "/cancel – отменить ввод"),
-        'channels_no_channels': "Список каналов пуст. Добавьте канал:\n/channels add <ID_канала или @username>",
-        'channels_list_title': "Подключенные каналы:",
-        'channels_item': "- {name} (ID: {id})",
-        'channels_add_usage': "Использование:\n/channels add <ID_канала или @username>",
-        'channels_remove_usage': "Использование:\n/channels remove <ID_канала>",
-        'channels_added': "Канал «{name}» добавлен.",
-        'channels_add_error': "Не удалось получить канал: {error}",
-        'channels_removed': "Канал удалён.",
-        'channels_not_found': "Канал не найден.",
-        'channels_unknown_command': "Неизвестная подкоманда. Используйте /channels add | remove",
-        'channels_remove_confirm': "Удалить канал «{name}»? Все связанные посты будут удалены.",
-        'no_channels': "Нет доступных каналов. Сначала добавьте канал через /channels.",
-        'create_step1': "Шаг 1/8: отправьте текст поста (или /skip).",
-        'create_step2': "Шаг 2/8: пришлите фото или видео, или /skip.",
-        'create_step2_retry': "Отправьте фото или видео, или /skip.",
-        'create_step3': "Шаг 3/8: выберите формат (Markdown, HTML или Без форматирования).",
-        'create_step4': ("Шаг 4/8: отправьте кнопки.\n"
-                         "Каждая кнопка на новой строке: «Текст | URL».\n"
-                         "Если кнопки не нужны – отправьте /skip."),
-        'create_step5': "Шаг 5/8: отправьте дату и время публикации в формате {format}.",
-        'create_time_error': "Неверный формат. Пример: {example}.",
-        'time_past_error': "Указанное время уже прошло. Пожалуйста, укажите время в будущем.",
-        'create_step6': ("Шаг 6/8: интервал повторения поста.\n"
-                         "Напр.: 1d (ежедневно), 7d (еженедельно), 12h (каждые 12 часов), 0 или /skip – без повтора."),
-        'create_repeat_error': "Неверный формат интервала. Примеры: 0, 1d, 12h, 30m.",
-        'create_step7': "Шаг 7/8: выберите канал для публикации (введите номер).",
-        'create_channel_error': "Канал не найден. Введите номер или ID.",
-        'confirm_post_scheduled': "Пост запланирован ✅",
-        'confirm_post_draft': "Черновик сохранён ✅",
-        'confirm_post_cancel': "Отменено.",
-        'view_usage': "Использование: /view <ID поста>",
-        'view_invalid_id': "Некорректный ID поста.",
-        'view_not_found': "Пост с таким ID не найден.",
-        'edit_usage': "Использование: /edit <ID поста>",
-        'edit_invalid_id': "Некорректный ID поста.",
-        'edit_post_not_found': "Пост с таким ID не найден.",
-        'edit_post_published': "Этот пост уже опубликован, редактирование невозможно.",
-        'edit_begin': "Редактирование поста #{id}.\nТекущий текст: \"{text}\"\nОтправьте новый текст или /skip, чтобы оставить без изменений.",
-        'edit_current_media': "Текущее медиа: {info} прикреплено.\nОтправьте новое фото или видео, чтобы заменить, или /skip, чтобы оставить, или введите 'нет' для удаления медиа.",
-        'edit_no_media': "Для поста нет медиа.\nОтправьте фото или видео, чтобы добавить, или /skip, чтобы пропустить.",
-        'edit_current_format': "Текущий формат: {format}. Выберите новый формат или отправьте /skip для сохранения текущего.",
-        'edit_current_buttons': "Текущие кнопки:\n{buttons_list}\nОтправьте новые кнопки (Текст | URL), или /skip для сохранения, или 'нет' для удаления всех.",
-        'edit_no_buttons': "Для поста нет кнопок.\nОтправьте кнопки в формате Текст | URL, или /skip, чтобы пропустить, или 'нет' чтобы оставить без кнопок.",
-        'edit_current_time': "Текущее время публикации: {time}\nВведите новую дату/время в формате {format}, или /skip для сохранения, или 'none' для удаления времени (черновик).",
-        'edit_time_error': "Неверный формат. Введите в формате {format} или /skip.",
-        'edit_current_repeat': "Текущий интервал повтора: {repeat}\nВведите новый интервал (0 — без повтора) или /skip для сохранения.",
-        'edit_repeat_error': "Неверный формат интервала. Примеры: 0, 1d, 12h, 30m.",
-        'edit_choose_channel': "Выберите новый канал для поста (или отправьте /skip, чтобы оставить текущий):",
-        'edit_keep_current_channel': "Оставить текущий",
-        'confirm_changes_saved': "Изменения сохранены для поста #{id}.",
-        'edit_cancelled': "Редактирование поста отменено.",
-        'edit_saved_notify': "Пост отредактирован ✅",
-        'edit_cancel_notify': "Редактирование отменено ❌",
-        'reschedule_usage': "Использование: /reschedule <ID поста> <дата и время>",
-        'reschedule_invalid_id': "Некорректный ID поста.",
-        'reschedule_not_found': "Пост с таким ID не найден.",
-        'reschedule_post_published': "Этот пост уже был опубликован, его нельзя перенести.",
-        'reschedule_success': "Пост #{id} перенесён.",
-        'no_posts': "Нет запланированных постов.",
-        'scheduled_posts_title': "Запланированные посты:",
-        'delete_usage': "Использование: /delete <ID поста>",
-        'delete_invalid_id': "Некорректный ID поста.",
-        'delete_not_found': "Пост с таким ID не найден.",
-        'delete_already_published': "Этот пост уже был опубликован, его нельзя удалить.",
-        'delete_success': "Пост #{id} удалён.",
-        'delete_confirm': "Удалить пост #{id}? Это действие необратимо.",
-        'no_text': "(без текста)",
-        'media_photo': "фото",
-        'media_video': "видео",
-        'media_media': "медиа",
-        'settings_current': ("Ваши настройки:\n"
-                             "Часовой пояс: {tz}\n"
-                             "Язык: {lang}\n"
-                             "Формат даты: {date_fmt}\n"
-                             "Формат времени: {time_fmt}\n"
-                             "Уведомления: {notify}"),
-        'settings_timezone_usage': "Использование:\n/settings tz <часовой пояс>",
-        'settings_language_usage': "Использование:\n/settings lang <ru|en>",
-        'settings_datefmt_usage': "Использование:\n/settings datefmt <формат даты> (например, DD.MM.YYYY)",
-        'settings_timefmt_usage': "Использование:\n/settings timefmt <формат времени> (например, HH:MM)",
-        'settings_notify_usage': "Использование:\n/settings notify <минут до уведомления> (0 для выкл.)",
-        'settings_unknown': "Неизвестная настройка. Доступно: tz, lang, datefmt, timefmt, notify",
-        'settings_tz_set': "Часовой пояс обновлен: {tz}",
-        'settings_lang_set': "Язык интерфейса обновлен: {lang_name}",
-        'settings_datefmt_set': "Формат даты обновлен: {fmt}",
-        'settings_timefmt_set': "Формат времени обновлен: {fmt}",
-        'settings_notify_set': "Уведомления перед публикацией: {minutes_str}",
-        'settings_invalid_tz': "Неправильный часовой пояс. Пример: Europe/Moscow или UTC+3",
-        'settings_invalid_lang': "Неподдерживаемый язык. Доступно: ru, en",
-        'settings_invalid_datefmt': "Неверный формат даты.",
-        'settings_invalid_timefmt': "Неверный формат времени.",
-        'settings_invalid_notify': "Неверное значение (в минутах).",
-        'lang_ru': "Русский",
-        'lang_en': "Английский",
-        'notify_message': "⌛️ Скоро будет опубликован пост #{id} в канале {channel} (через {minutes} мин.).",
-        'notify_message_less_min': "⌛️ Скоро будет опубликован пост #{id} в канале {channel} (менее чем через минуту).",
-        'error_post_failed': "⚠️ Не удалось отправить пост #{id} в канал {channel}: {error}",
-        'projects_list_title': "Ваши проекты:",
-        'projects_item': "- {name}",
-        'projects_item_current': "- {name} (текущий)",
-        'projects_created': "Проект \"{name}\" создан ✅",
-        'projects_switched': "Переключено на проект \"{name}\" ✅",
-        'projects_not_found': "Проект не найден или доступ запрещен.",
-        'projects_invite_usage': "Использование:\n/project invite <ID пользователя>",
-        'projects_invite_success': "Пользователь {user_id} добавлен в проект.",
-        'projects_invite_not_found': "Пользователь не найден или не запускал бота.",
-        'projects_invited_notify': "Вас добавили в проект \"{project}\" пользователем {user}. Используйте /project для переключения.",
-        'yes_btn': "Да",
-        'no_btn': "Нет"
+    "ru": {
+        # Start and basic
+        "start_welcome": """
+🤖 **Добро пожаловать в бот управления каналами!**
+
+Этот бот поможет вам автоматизировать публикацию постов в Telegram каналах.
+
+**Основные возможности:**
+• 📝 Создание и планирование постов
+• 📺 Управление несколькими каналами
+• ⏰ Автоматическая публикация по расписанию
+• 🔄 Повторяющиеся посты
+• 📊 Статистика публикаций
+
+**Быстрый старт:**
+1. Добавьте канал: `/channels add @ваш_канал`
+2. Создайте пост: `/create` или `/quickpost`
+3. Просмотрите посты: `/list`
+
+Используйте `/help` для полной справки или `/menu` для главного меню.
+""",
+        "help": "Используйте /help для получения справки",
+        
+        # Channels
+        "channels_list_title": "📋 **Ваши каналы:**",
+        "channels_item": "• {name} (ID: {id})",
+        "channels_item_current": "• {name} ✅",
+        "channels_no_channels": "❌ У вас нет добавленных каналов. Используйте /channels add @канал",
+        "channels_added": "✅ Канал {name} успешно добавлен!",
+        "channels_removed": "✅ Канал успешно удален",
+        "channels_not_found": "❌ Канал не найден",
+        "channels_remove_confirm": "Вы уверены, что хотите удалить канал {name}?",
+        "channels_unknown_command": "❌ Неизвестная команда. Используйте /help",
+        
+        # Posts
+        "no_text": "[Пост без текста]",
+        "confirm_publish": "📋 **Подтверждение публикации**\n\nКанал: {channel}\nВремя: {time}\n\nОпубликовать пост?",
+        "confirm_post_published": "✅ Пост успешно опубликован!",
+        "confirm_post_scheduled": "⏰ Пост запланирован на {time}",
+        "confirm_post_cancel": "❌ Операция отменена",
+        "confirm_post_saved": "📝 Черновик сохранен",
+        "confirm_changes_saved": "✅ Изменения в посте #{id} сохранены",
+        
+        # Time formats
+        "time_past_error": "❌ Время публикации должно быть в будущем!",
+        "time_format_error": "❌ Неверный формат времени. Используйте формат: {format}",
+        
+        # Edit post
+        "edit_usage": "Использование: /edit <post_id>",
+        "edit_invalid_id": "❌ Неверный ID поста",
+        "edit_post_not_found": "❌ Пост не найден или у вас нет доступа",
+        "edit_post_published": "❌ Нельзя редактировать опубликованный пост",
+        "edit_begin": "📝 **Редактирование поста #{id}**\n\nТекущий текст:\n{text}\n\nОтправьте новый текст или /skip",
+        "edit_current_media": "Текущее медиа: {info}\nОтправьте новое медиа или /skip",
+        "edit_no_media": "Медиа не прикреплено. Отправьте фото/видео или /skip",
+        "edit_current_format": "Текущий формат: {format}\nОтправьте: html, markdown, none или /skip",
+        "edit_current_buttons": "Текущие кнопки:\n{buttons_list}\n\nОтправьте новые кнопки или /skip",
+        "edit_no_buttons": "Кнопки не добавлены. Отправьте кнопки в формате 'Текст | URL' или /skip",
+        "edit_current_time": "Текущее время: {time}\nОтправьте новое время в формате {format} или /skip",
+        "edit_time_error": "❌ Неверный формат времени. Используйте: {format}",
+        "edit_current_repeat": "Текущий интервал повтора: {repeat}\nОтправьте новый (например: 1h, 1d) или /skip",
+        "edit_repeat_error": "❌ Неверный формат интервала. Используйте: 1m, 1h, 1d",
+        "edit_cancelled": "❌ Редактирование отменено",
+        
+        # Delete post
+        "delete_usage": "Использование: /delete <post_id>",
+        "delete_invalid_id": "❌ Неверный ID поста",
+        "delete_not_found": "❌ Пост не найден",
+        "delete_already_published": "❌ Нельзя удалить опубликованный пост",
+        "delete_success": "✅ Пост #{id} успешно удален",
+        
+        # Projects
+        "projects_list_title": "📁 **Ваши проекты:**",
+        "projects_item": "• {name}",
+        "projects_item_current": "• {name} ✅",
+        "projects_not_found": "❌ Проект не найден",
+        "projects_created": "✅ Проект '{name}' создан и активирован",
+        "projects_switched": "✅ Переключен на проект '{name}'",
+        "projects_invite_usage": "Использование: /project invite <user_id>",
+        "projects_invite_not_found": "❌ Пользователь не найден. Он должен сначала запустить бота",
+        "projects_invite_success": "✅ Пользователь {user_id} добавлен в проект",
+        "projects_invited_notify": "Вас пригласили в проект '{project}' пользователь {user}",
+        
+        # Notifications
+        "notify_message": "⏰ Пост #{id} будет опубликован в канал {channel} через {minutes} минут",
+        "notify_message_less_min": "⏰ Пост #{id} будет опубликован в канал {channel} менее чем через минуту",
+        "error_post_failed": "❌ Ошибка публикации поста #{id} в канал {channel}: {error}",
+        
+        # Media
+        "media_photo": "фото",
+        "media_video": "видео",
+        "media_media": "медиа",
+        
+        # Buttons
+        "yes_btn": "✅ Да",
+        "no_btn": "❌ Нет",
     },
-    'en': {
-        'start_welcome': "Hello! I'm a bot for scheduling posts.\nUse /help to see available commands.",
-        'help': ("Commands:\n"
-                 "/create – create a post\n"
-                 "/list – list scheduled posts\n"
-                 "/view <ID> – view a post\n"
-                 "/edit <ID> – edit a post\n"
-                 "/reschedule <ID> <datetime> – reschedule a post\n"
-                 "/delete <ID> – delete a post\n"
-                 "/channels – manage channels\n"
-                 "/project – projects (switch/create)\n"
-                 "/settings – user settings\n"
-                 "/cancel – cancel input"),
-        'channels_no_channels': "No channels added. Add a channel via:\n/channels add <channel_id or @username>",
-        'channels_list_title': "Connected channels:",
-        'channels_item': "- {name} (ID: {id})",
-        'channels_add_usage': "Usage:\n/channels add <channel_id or @username>",
-        'channels_remove_usage': "Usage:\n/channels remove <channel_id>",
-        'channels_added': "Channel \"{name}\" added.",
-        'channels_add_error': "Failed to get channel: {error}",
-        'channels_removed': "Channel removed.",
-        'channels_not_found': "Channel not found.",
-        'channels_unknown_command': "Unknown subcommand. Use /channels add | remove",
-        'channels_remove_confirm': "Remove channel \"{name}\"? All associated posts will be deleted.",
-        'no_channels': "No channels available. Please add a channel via /channels first.",
-        'create_step1': "Step 1/8: send the post text (or /skip).",
-        'create_step2': "Step 2/8: send a photo or video, or /skip.",
-        'create_step2_retry': "Please send a photo or video, or /skip.",
-        'create_step3': "Step 3/8: choose format (Markdown, HTML or None).",
-        'create_step4': ("Step 4/8: send buttons.\n"
-                         "One button per line: Text | URL.\n"
-                         "If no buttons needed, send /skip."),
-        'create_step5': "Step 5/8: send the date/time in format {format}.",
-        'create_time_error': "Invalid format. Example: {example}.",
-        'time_past_error': "The specified time is in the past. Please provide a future time.",
-        'create_step6': ("Step 6/8: set repeat interval.\n"
-                         "E.g. 1d (daily), 7d (weekly), 12h (every 12 hours), 0 or /skip for no repeat."),
-        'create_repeat_error': "Invalid interval format. Examples: 0, 1d, 12h, 30m.",
-        'create_step7': "Step 7/8: choose a channel for posting (enter number).",
-        'create_channel_error': "Channel not found. Enter a number or ID.",
-        'confirm_post_scheduled': "Post scheduled ✅",
-        'confirm_post_draft': "Draft saved ✅",
-        'confirm_post_cancel': "Cancelled.",
-        'view_usage': "Usage: /view <post ID>",
-        'view_invalid_id': "Invalid post ID.",
-        'view_not_found': "Post not found.",
-        'edit_usage': "Usage: /edit <post ID>",
-        'edit_invalid_id': "Invalid post ID.",
-        'edit_post_not_found': "Post not found.",
-        'edit_post_published': "This post has already been published and cannot be edited.",
-        'edit_begin': "Editing post #{id}.\nCurrent text: \"{text}\"\nSend new text or /skip to leave unchanged.",
-        'edit_current_media': "Current media: {info} attached.\nSend a new photo or video to replace, or /skip to keep, or type 'none' to remove.",
-        'edit_no_media': "This post has no media.\nSend a photo or video to add, or /skip to continue.",
-        'edit_current_format': "Current format: {format}. Choose a new format or send /skip to keep current.",
-        'edit_current_buttons': "Current buttons:\n{buttons_list}\nSend new buttons (Text | URL), or /skip to keep, or 'none' to remove all.",
-        'edit_no_buttons': "This post has no buttons.\nSend buttons in Text | URL format to add, or /skip to skip, or 'none' to keep none.",
-        'edit_current_time': "Current scheduled time: {time}\nEnter a new date/time in format {format}, or /skip to keep, or 'none' to unschedule (draft).",
-        'edit_time_error': "Invalid format. Use {format} or /skip.",
-        'edit_current_repeat': "Current repeat interval: {repeat}\nEnter a new interval (0 for none) or /skip to keep.",
-        'edit_repeat_error': "Invalid interval format. Examples: 0, 1d, 12h, 30m.",
-        'edit_choose_channel': "Choose a new channel for the post (or send /skip to keep the current one):",
-        'edit_keep_current_channel': "Keep current",
-        'confirm_changes_saved': "Changes saved for post #{id}.",
-        'edit_cancelled': "Post editing cancelled.",
-        'edit_saved_notify': "Post edited ✅",
-        'edit_cancel_notify': "Edit cancelled ❌",
-        'reschedule_usage': "Usage: /reschedule <post ID> <datetime>",
-        'reschedule_invalid_id': "Invalid post ID.",
-        'reschedule_not_found': "Post not found.",
-        'reschedule_post_published': "This post has already been published and cannot be rescheduled.",
-        'reschedule_success': "Post #{id} rescheduled.",
-        'no_posts': "No scheduled posts.",
-        'scheduled_posts_title': "Scheduled posts:",
-        'delete_usage': "Usage: /delete <post ID>",
-        'delete_invalid_id': "Invalid post ID.",
-        'delete_not_found': "Post not found.",
-        'delete_already_published': "This post has already been published and cannot be deleted.",
-        'delete_success': "Post #{id} deleted.",
-        'delete_confirm': "Delete post #{id}? This action cannot be undone.",
-        'no_text': "(no text)",
-        'media_photo': "photo",
-        'media_video': "video",
-        'media_media': "media",
-        'settings_current': ("Your settings:\n"
-                             "Timezone: {tz}\n"
-                             "Language: {lang}\n"
-                             "Date format: {date_fmt}\n"
-                             "Time format: {time_fmt}\n"
-                             "Notifications: {notify}"),
-        'settings_timezone_usage': "Usage:\n/settings tz <timezone>",
-        'settings_language_usage': "Usage:\n/settings lang <ru|en>",
-        'settings_datefmt_usage': "Usage:\n/settings datefmt <date format> (e.g. DD.MM.YYYY)",
-        'settings_timefmt_usage': "Usage:\n/settings timefmt <time format> (e.g. HH:MM)",
-        'settings_notify_usage': "Usage:\n/settings notify <minutes before> (0 to disable)",
-        'settings_unknown': "Unknown setting. Available: tz, lang, datefmt, timefmt, notify",
-        'settings_tz_set': "Timezone updated to {tz}",
-        'settings_lang_set': "Language updated to {lang_name}",
-        'settings_datefmt_set': "Date format updated to {fmt}",
-        'settings_timefmt_set': "Time format updated to {fmt}",
-        'settings_notify_set': "Notification lead time set to {minutes_str}",
-        'settings_invalid_tz': "Invalid timezone. Example: Europe/Moscow or UTC+3",
-        'settings_invalid_lang': "Unsupported language. Available: ru, en",
-        'settings_invalid_datefmt': "Invalid date format.",
-        'settings_invalid_timefmt': "Invalid time format.",
-        'settings_invalid_notify': "Invalid notification value.",
-        'lang_ru': "Russian",
-        'lang_en': "English",
-        'notify_message': "⌛️ Post #{id} in channel {channel} will be posted in {minutes} min.",
-        'notify_message_less_min': "⌛️ Post #{id} in channel {channel} will be posted in less than a minute.",
-        'error_post_failed': "⚠️ Failed to send post #{id} to channel {channel}: {error}",
-        'projects_list_title': "Your projects:",
-        'projects_item': "- {name}",
-        'projects_item_current': "- {name} (current)",
-        'projects_created': "Project \"{name}\" created ✅",
-        'projects_switched': "Switched to project \"{name}\" ✅",
-        'projects_not_found': "Project not found or access denied.",
-        'projects_invite_usage': "Usage:\n/project invite <user_id>",
-        'projects_invite_success': "User {user_id} added to the project.",
-        'projects_invite_not_found': "User not found or has not started the bot.",
-        'projects_invited_notify': "You have been added to project \"{project}\" by {user}. Use /project to switch to it.",
-        'yes_btn': "Yes",
-        'no_btn': "No"
+    "en": {
+        # Start and basic
+        "start_welcome": """
+🤖 **Welcome to the Channel Management Bot!**
+
+This bot will help you automate post publishing in Telegram channels.
+
+**Main features:**
+• 📝 Create and schedule posts
+• 📺 Manage multiple channels
+• ⏰ Automatic scheduled publishing
+• 🔄 Repeating posts
+• 📊 Publishing statistics
+
+**Quick start:**
+1. Add a channel: `/channels add @your_channel`
+2. Create a post: `/create` or `/quickpost`
+3. View posts: `/list`
+
+Use `/help` for full guide or `/menu` for main menu.
+""",
+        "help": "Use /help for help",
+        
+        # Channels
+        "channels_list_title": "📋 **Your channels:**",
+        "channels_item": "• {name} (ID: {id})",
+        "channels_item_current": "• {name} ✅",
+        "channels_no_channels": "❌ No channels added. Use /channels add @channel",
+        "channels_added": "✅ Channel {name} successfully added!",
+        "channels_removed": "✅ Channel successfully removed",
+        "channels_not_found": "❌ Channel not found",
+        "channels_remove_confirm": "Are you sure you want to remove channel {name}?",
+        "channels_unknown_command": "❌ Unknown command. Use /help",
+        
+        # Posts
+        "no_text": "[Post without text]",
+        "confirm_publish": "📋 **Publish confirmation**\n\nChannel: {channel}\nTime: {time}\n\nPublish post?",
+        "confirm_post_published": "✅ Post successfully published!",
+        "confirm_post_scheduled": "⏰ Post scheduled for {time}",
+        "confirm_post_cancel": "❌ Operation cancelled",
+        "confirm_post_saved": "📝 Draft saved",
+        "confirm_changes_saved": "✅ Changes to post #{id} saved",
+        
+        # Time formats
+        "time_past_error": "❌ Publication time must be in the future!",
+        "time_format_error": "❌ Invalid time format. Use format: {format}",
+        
+        # Edit post
+        "edit_usage": "Usage: /edit <post_id>",
+        "edit_invalid_id": "❌ Invalid post ID",
+        "edit_post_not_found": "❌ Post not found or access denied",
+        "edit_post_published": "❌ Cannot edit published post",
+        "edit_begin": "📝 **Editing post #{id}**\n\nCurrent text:\n{text}\n\nSend new text or /skip",
+        "edit_current_media": "Current media: {info}\nSend new media or /skip",
+        "edit_no_media": "No media attached. Send photo/video or /skip",
+        "edit_current_format": "Current format: {format}\nSend: html, markdown, none or /skip",
+        "edit_current_buttons": "Current buttons:\n{buttons_list}\n\nSend new buttons or /skip",
+        "edit_no_buttons": "No buttons added. Send buttons as 'Text | URL' or /skip",
+        "edit_current_time": "Current time: {time}\nSend new time in format {format} or /skip",
+        "edit_time_error": "❌ Invalid time format. Use: {format}",
+        "edit_current_repeat": "Current repeat interval: {repeat}\nSend new (e.g.: 1h, 1d) or /skip",
+        "edit_repeat_error": "❌ Invalid interval format. Use: 1m, 1h, 1d",
+        "edit_cancelled": "❌ Editing cancelled",
+        
+        # Delete post
+        "delete_usage": "Usage: /delete <post_id>",
+        "delete_invalid_id": "❌ Invalid post ID",
+        "delete_not_found": "❌ Post not found",
+        "delete_already_published": "❌ Cannot delete published post",
+        "delete_success": "✅ Post #{id} successfully deleted",
+        
+        # Projects
+        "projects_list_title": "📁 **Your projects:**",
+        "projects_item": "• {name}",
+        "projects_item_current": "• {name} ✅",
+        "projects_not_found": "❌ Project not found",
+        "projects_created": "✅ Project '{name}' created and activated",
+        "projects_switched": "✅ Switched to project '{name}'",
+        "projects_invite_usage": "Usage: /project invite <user_id>",
+        "projects_invite_not_found": "❌ User not found. They must start the bot first",
+        "projects_invite_success": "✅ User {user_id} added to project",
+        "projects_invited_notify": "You were invited to project '{project}' by {user}",
+        
+        # Notifications
+        "notify_message": "⏰ Post #{id} will be published to {channel} in {minutes} minutes",
+        "notify_message_less_min": "⏰ Post #{id} will be published to {channel} in less than a minute",
+        "error_post_failed": "❌ Failed to publish post #{id} to {channel}: {error}",
+        
+        # Media
+        "media_photo": "photo",
+        "media_video": "video",
+        "media_media": "media",
+        
+        # Buttons
+        "yes_btn": "✅ Yes",
+        "no_btn": "❌ No",
     }
 }
