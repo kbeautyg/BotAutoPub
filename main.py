@@ -31,33 +31,28 @@ import projects
 # Улучшенные модули
 import main_menu
 import channels
-import create_post_improved
+import create_post_improved  # Исправленная версия
 import scheduled_posts
 import settings_improved
+import view_post  # Новый модуль для просмотра
 
-# Старые модули (для совместимости)
-# import create_post
+# Модули для совместимости
 import edit_post
-# import list_posts
 import delete_post
-# import settings
 
-# Регистрируем роутеры
+# Регистрируем роутеры в правильном порядке
+# Важно: сначала регистрируем модули с командами, потом с общими обработчиками
 dp.include_router(start.router)
 dp.include_router(help.router)
-dp.include_router(main_menu.router)  # Главное меню
-dp.include_router(channels.router)  # Улучшенное управление каналами
-dp.include_router(create_post_improved.router)  # Улучшенное создание постов
-dp.include_router(scheduled_posts.router)  # Управление отложенными постами
-dp.include_router(settings_improved.router)  # Улучшенные настройки
 dp.include_router(projects.router)
-
-# Старые модули для совместимости (без конфликтующих команд)
-# dp.include_router(create_post.router)  # Конфликт с create_post_improved
+dp.include_router(channels.router)
+dp.include_router(create_post_improved.router)  # Исправленная версия
+dp.include_router(view_post.router)  # Новый модуль просмотра
+dp.include_router(scheduled_posts.router)
+dp.include_router(settings_improved.router)
 dp.include_router(edit_post.router)
-# dp.include_router(list_posts.router)  # Конфликт с scheduled_posts
 dp.include_router(delete_post.router)
-# dp.include_router(settings.router)  # Конфликт с settings_improved
+dp.include_router(main_menu.router)  # В конце, чтобы не перехватывал команды
 
 # Import and start the scheduler
 import auto_post
@@ -72,6 +67,10 @@ async def main():
     
     # Start polling
     print("🔄 Начинаем получение обновлений...")
+    
+    # Удаляем webhook если он был установлен
+    await bot.delete_webhook(drop_pending_updates=True)
+    
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
