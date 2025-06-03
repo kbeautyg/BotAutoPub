@@ -280,8 +280,20 @@ class SupabaseDB:
 
     def get_due_posts(self, current_time):
         """Get all posts due at or before current_time (not published and not drafts)."""
-        now_str = current_time.strftime("%Y-%m-%dT%H:%M:%S%z") if hasattr(current_time, "strftime") else str(current_time)
-        res = self.client.table("posts").select("*").eq("published", False).eq("draft", False).lte("publish_time", now_str).execute()
+        # Use ISO format with timezone for consistent comparison
+        now_str = (
+            current_time.isoformat()
+            if hasattr(current_time, "isoformat")
+            else str(current_time)
+        )
+        res = (
+            self.client.table("posts")
+            .select("*")
+            .eq("published", False)
+            .eq("draft", False)
+            .lte("publish_time", now_str)
+            .execute()
+        )
         return res.data or []
 
     def mark_post_published(self, post_id: int):
