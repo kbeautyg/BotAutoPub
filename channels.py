@@ -1,439 +1,523 @@
 from aiogram import Router, types, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.exceptions import TelegramAPIError  # Импортируем специфичные ошибки API
 import supabase_db
-from __init__ import TEXTS # Убедитесь, что TEXTS корректно импортируется и содержит нужные ключи
+from __init__ import TEXTS
 import asyncio
-import logging # Лучше использовать logging вместо print для продакшена
-
-# Настройка логирования (опционально, но рекомендуется)
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
-
 
 router = Router()
 
-# -------------------------------------------------------------
-# Помощники для меню
-# -------------------------------------------------------------
-
+# Главное меню управления каналами
 def get_channels_main_menu(lang: str):
-    # Убедимся, что TEXTS содержит эти ключи или используем значения по умолчанию
-    texts_menu = TEXTS.get(lang, {}).get('channels_menu_buttons', {
-        'add': "➕ Добавить",
-        'remove': "🗑 Удалить",
-        'list': "📋 Список",
-        'main_menu': "🏠 Главное меню"
-    })
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=texts_menu['add'], callback_data="channels_add")],
-        [InlineKeyboardButton(text=texts_menu['remove'], callback_data="channels_remove")],
-        [InlineKeyboardButton(text=texts_menu['list'], callback_data="channels_list")],
-        [InlineKeyboardButton(text=texts_menu['main_menu'], callback_data="main_menu")],
+        [InlineKeyboardButton(text="📋 Список каналов", callback_data="channels_list")],
+        [InlineKeyboardButton(text="➕ Добавить канал", callback_data="channels_add")],
+        [InlineKeyboardButton(text="🗑 Удалить канал", callback_data="channels_remove")],
+        [InlineKeyboardButton(text="🔄 Проверить права", callback_data="channels_check_admin")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
-
-
-def get_back_menu(lang: str = "ru"): # Добавим lang для консистентности
-    text_back = TEXTS.get(lang, {}).get('general_buttons', {}).get('back', "🔙 Назад")
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=text_back, callback_data="channels_menu")]
-    ])
-
-
-# -------------------------------------------------------------
-# Основная команда /channels
-# -------------------------------------------------------------
 
 @router.message(Command("channels"))
 async def cmd_channels(message: Message, state: FSMContext):
     user_id = message.from_user.id
-    user_data = supabase_db.db.ensure_user(user_id) # Переименовал user в user_data для ясности
-    lang = user_data.get("language", "ru") if user_data else "ru"
-
+    user = supabase_db.db.ensure_user(user_id)
+    lang = user.get("language", "ru") if user else "ru"
+    
+    # Parse subcommand
     args = message.text.split()[1:] if len(message.text.split()) > 1 else []
-
+    
     if not args:
-        await show_channels_menu(message, user_data, lang)
-        return
-
-    sub_command = args[0].lower()
-    if sub_command == "add" and len(args) > 1:
-        await add_channel_direct(message, user_data, lang, args[1])
-    elif sub_command == "remove" and len(args) > 1:
-        await remove_channel_direct(message, user_data, lang, args[1])
-    elif sub_command == "list":
-        await list_channels_direct(message, user_data, lang)
+        # Show main channels menu
+        await show_channels_menu(message, user, lang)
+    elif args[0] == "add" and len(args) > 1:
+        await add_channel_direct(message, user, lang, args[1])
+    elif args[0] == "remove" and len(args) > 1:
+        await remove_channel_direct(message, user, lang, args[1])
+    elif args[0] == "list":
+        await list_channels_direct(message, user, lang)
     else:
-        await message.answer(TEXTS.get(lang, {}).get('channels_unknown_command', "Неизвестная подкоманда для /channels"))
+        await message.answer(TEXTS[lang]['channels_unknown_command'])
 
-
-async def show_channels_menu(message: Message, user_data: dict, lang: str):
+async def show_channels_menu(message: Message, user: dict, lang: str):
     """Показать главное меню управления каналами"""
-    text = TEXTS.get(lang, {}).get('channels_manage_title', "🔧 **Управление каналами**\n\nВыберите действие:")
+    text = "🔧 **Управление каналами**\n\nВыберите действие:"
     keyboard = get_channels_main_menu(lang)
-    # Используем message.reply если это ответ на сообщение, или message.answer если новое
-    # Для команды обычно message.answer
     await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
 
-
-# -------------------------------------------------------------
-# Добавление канала напрямую (без FSM) - УЛУЧШЕННАЯ ВЕРСИЯ
-# -------------------------------------------------------------
-
-async def add_channel_direct(message: Message, user_data: dict, lang: str, identifier: str):
-    """Добавить канал напрямую"""
-    project_id = user_data.get("current_project")
-    if not project_id:
-        await message.answer(TEXTS.get(lang, {}).get('project_not_active', "❌ Нет активного проекта. Создайте проект через /project"))
-        return
-
-    chat_info = None
-    try:
-        logger.info(f"Attempting to get chat info for identifier: {identifier}")
-        if identifier.startswith("@"):
-            chat_info = await message.bot.get_chat(identifier)
-        else:
-            try:
-                chat_id_int = int(identifier)
-                chat_info = await message.bot.get_chat(chat_id_int)
-            except ValueError:
-                await message.answer(TEXTS.get(lang, {}).get('channels_invalid_id_format', "❌ Неверный формат ID канала. ID должен быть числом."))
-                return
-        
-        logger.info(f"Fetched chat: ID={chat_info.id}, Title='{chat_info.title}', Type={chat_info.type}, Username=@{chat_info.username}")
-
-    except TelegramAPIError as e:
-        logger.warning(f"TelegramAPIError getting chat '{identifier}': {e.description}")
-        if "chat not found" in e.description.lower():
-            await message.answer(
-                TEXTS.get(lang, {}).get('channels_not_found_detailed', 
-                f"❌ Канал с ID/username '{identifier}' не найден. Убедитесь, что ID/username указан верно и, если канал приватный, бот добавлен в него.")
-            )
-        elif "bot was blocked by the user" in e.description.lower() and chat_info and chat_info.type == "private": # Если это ЛС с ботом
-             pass # Это нормально, если пользователь заблокировал бота, но мы можем пытаться добавить "канал" (ЛС)
-        else:
-            await message.answer(TEXTS.get(lang, {}).get('channels_get_info_error', "❌ Ошибка при получении информации о канале:") + f" {e.description}")
-        return
-    except Exception as e:
-        logger.error(f"Unexpected error fetching chat '{identifier}': {e}", exc_info=True)
-        await message.answer(TEXTS.get(lang, {}).get('channels_get_info_unexpected_error', "❌ Непредвиденная ошибка при получении информации о канале."))
-        return
-
-    if not chat_info:
-        # Эта проверка на случай, если предыдущие return не сработали по какой-то причине
-        await message.answer(TEXTS.get(lang, {}).get('channels_get_info_failed', "❌ Не удалось получить информацию о канале."))
-        return
-
-    # Проверяем права пользователя в канале
-    user_is_admin_in_channel = False
-    try:
-        # Бот должен быть в чате, чтобы проверить права другого пользователя, если это не супергруппа/канал где бот админ.
-        # Для публичных каналов это может работать и без участия бота в канале.
-        user_member = await message.bot.get_chat_member(chat_info.id, message.from_user.id)
-        logger.info(f"User {message.from_user.id} status in chat {chat_info.id} ('{chat_info.title}'): {user_member.status}")
-        if user_member.status in ['administrator', 'creator']:
-            user_is_admin_in_channel = True
-    except TelegramAPIError as e:
-        logger.warning(f"TelegramAPIError checking user ({message.from_user.id}) admin status in chat {chat_info.id} ('{chat_info.title}'): {e.description}")
-        # Если бот не участник, он может не смочь проверить права пользователя.
-        # Сообщение об этом будет выведено ниже, если user_is_admin_in_channel останется False.
-        # Типичные ошибки: "user not found" (если юзер не в чате, или бот не в чате и не видит юзера),
-        # "bot is not a member of the channel/supergroup"
-        pass # user_is_admin_in_channel останется False
-    except Exception as e:
-        logger.error(f"Exception checking user admin status for user {message.from_user.id} in chat {chat_info.id}: {e}", exc_info=True)
-        pass # user_is_admin_in_channel останется False
-
-    if not user_is_admin_in_channel:
-        # Формируем сообщение с названием канала
-        channel_name_for_msg = f"'{chat_info.title}' (@{chat_info.username})" if chat_info.username else f"'{chat_info.title}'"
-        error_text_key = 'channels_user_not_admin'
-        default_error_text = (
-            f"❌ **Ошибка доступа**\n\n"
-            f"Вы должны быть администратором в канале {channel_name_for_msg} для его добавления, "
-            "либо не удалось подтвердить ваши права администратора.\n\n"
-            "Убедитесь, что:\n"
-            "1. Вы указали правильный ID или @username канала.\n"
-            "2. Вы действительно являетесь администратором (или создателем) в этом канале.\n"
-            "3. Бот добавлен в этот канал как участник (это необходимо для проверки ваших прав)."
-        )
-        await message.answer(TEXTS.get(lang, {}).get(error_text_key, default_error_text), parse_mode="Markdown")
-        return
-
-    # Проверяем права бота в канале
-    bot_is_verified_admin_in_channel = False
-    bot_can_post = False # Для более точной проверки
-    bot_admin_check_details = ""
-    try:
-        bot_member_in_chat = await message.bot.get_chat_member(chat_info.id, message.bot.id)
-        logger.info(f"Bot {message.bot.id} status in chat {chat_info.id} ('{chat_info.title}'): {bot_member_in_chat.status}")
-        if bot_member_in_chat.status in ['administrator', 'creator']:
-            bot_is_verified_admin_in_channel = True
-            # Дополнительно проверим право на постинг, если это администратор
-            if hasattr(bot_member_in_chat, 'can_post_messages') and bot_member_in_chat.can_post_messages:
-                bot_can_post = True
-            elif bot_member_in_chat.status == 'creator': # Создатель всегда может постить
-                 bot_can_post = True
-            
-            if not bot_can_post and bot_is_verified_admin_in_channel:
-                 bot_admin_check_details = TEXTS.get(lang,{}).get('channels_bot_admin_no_post', "Бот является администратором, но не имеет права публиковать сообщения.")
-            elif bot_can_post:
-                 bot_admin_check_details = TEXTS.get(lang,{}).get('channels_bot_admin_with_post', "Бот является администратором с правом публикации.")
-
-        else: # Бот не админ, но может быть участником
-            bot_admin_check_details = TEXTS.get(lang,{}).get('channels_bot_not_admin', "Бот является участником канала, но не администратором.")
-            
-    except TelegramAPIError as e:
-        logger.warning(f"TelegramAPIError checking bot ({message.bot.id}) admin status in chat {chat_info.id} ('{chat_info.title}'): {e.description}")
-        if "user not found" in e.description.lower() or "bot is not a member" in e.description.lower():
-            bot_admin_check_details = TEXTS.get(lang,{}).get('channels_bot_not_member', "Бот не является участником этого канала.")
-        else:
-            bot_admin_check_details = TEXTS.get(lang,{}).get('channels_bot_check_tg_error', "Ошибка Telegram при проверке прав бота:") + f" {e.description}."
-    except Exception as e:
-        logger.error(f"Exception checking bot admin status for bot {message.bot.id} in chat {chat_info.id}: {e}", exc_info=True)
-        bot_admin_check_details = TEXTS.get(lang,{}).get('channels_bot_check_unknown_error', "Неизвестная ошибка при проверке прав бота.")
-
-    # Сообщение о статусе бота, если он не полностью готов к работе
-    if not bot_is_verified_admin_in_channel or (bot_is_verified_admin_in_channel and not bot_can_post) :
-        warning_text_key = 'channels_bot_warning_publish'
-        default_warning_text = (
-            f"⚠️ **Внимание!** {bot_admin_check_details}\n"
-            "Добавить канал можно, но автоматическая публикация постов (если она требуется) может быть невозможна.\n\n"
-            "Если нужна автоматическая публикация, убедитесь, что бот является администратором канала с правом 'Публикация сообщений'."
-        )
-        await message.answer(TEXTS.get(lang, {}).get(warning_text_key, default_warning_text), parse_mode="Markdown")
-
-    # Добавляем канал в базу данных
-    try:
-        # Убедимся, что chat_info.username существует, иначе передаем None или пустую строку
-        username_to_db = chat_info.username if hasattr(chat_info, 'username') else None
-        
-        channel_data = supabase_db.db.add_channel(
-            user_id=message.from_user.id,
-            chat_id=chat_info.id,
-            name=chat_info.title or username_to_db or str(chat_info.id), # Название канала
-            project_id=project_id,
-            username=username_to_db,
-            is_admin_verified=bot_is_verified_admin_in_channel and bot_can_post # Сохраняем, может ли бот постить
-        )
-
-        if channel_data:
-            status_text = ""
-            if bot_is_verified_admin_in_channel and bot_can_post:
-                status_text = TEXTS.get(lang,{}).get('channels_add_status_bot_admin_can_post', "✅ (бот - админ с правом постинга)")
-            elif bot_is_verified_admin_in_channel:
-                status_text = TEXTS.get(lang,{}).get('channels_add_status_bot_admin_no_post', "⚠️ (бот - админ, но нет права постить)")
-            else:
-                status_text = TEXTS.get(lang,{}).get('channels_add_status_bot_not_admin', "❓ (бот не админ или нет прав)")
-
-            channel_name_for_msg = f"'{channel_data['name']}'"
-            success_text_key = 'channels_added_success'
-            default_success_text = (
-                f"✅ **Канал {channel_name_for_msg} добавлен** {status_text}\n\n"
-                f"**ID:** `{channel_data['chat_id']}`"
-            )
-            await message.answer(TEXTS.get(lang, {}).get(success_text_key, default_success_text), parse_mode="Markdown")
-        else:
-            # Проверим, может канал уже существует?
-            # Это зависит от реализации supabase_db.db.add_channel (возвращает ли он None при дубликате или ошибку)
-            # Предположим, что add_channel может вернуть None/False, если канал уже есть и не был обновлен
-            existing_channel = supabase_db.db.get_channel_by_chat_id_and_project(chat_info.id, project_id) # Нужна такая функция
-            if existing_channel:
-                 await message.answer(TEXTS.get(lang, {}).get('channels_already_exists', f"ℹ️ Канал '{chat_info.title}' уже был ранее добавлен в этот проект."))
-            else:
-                 await message.answer(TEXTS.get(lang, {}).get('channels_add_db_error', "❌ Ошибка при добавлении канала в базу данных. Попробуйте позже."))
-
-    except Exception as e:
-        logger.error(f"Database error adding channel {chat_info.id} ('{chat_info.title}'): {e}", exc_info=True)
-        await message.answer(TEXTS.get(lang, {}).get('channels_add_db_exception', "❌ Критическая ошибка при сохранении канала в базу данных."))
-
-
-# -------------------------------------------------------------
-# Удаление канала напрямую
-# -------------------------------------------------------------
-
-async def remove_channel_direct(message: Message, user_data: dict, lang: str, identifier: str):
-    project_id = user_data.get("current_project")
-    if not project_id: # Хотя для удаления канала проект не так важен, как user_id и channel_id
-        # но если логика такая, что каналы привязаны к проектам юзера, то ок
-        await message.answer(TEXTS.get(lang, {}).get('project_not_active', "❌ Нет активного проекта. Создайте проект через /project"))
-        return
-
-    # Создаем клавиатуру подтверждения
-    confirm_text = TEXTS.get(lang,{}).get('general_buttons',{}).get('yes', "✅ Да")
-    cancel_text = TEXTS.get(lang,{}).get('general_buttons',{}).get('no', "❌ Нет")
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text=confirm_text, callback_data=f"confirm_remove_channel_direct:{identifier}"), # Изменил колбек для ясности
-            InlineKeyboardButton(text=cancel_text, callback_data="cancel_remove_channel")
-        ]
-    ])
-    question_text = TEXTS.get(lang, {}).get('channels_remove_confirm', "Вы уверены, что хотите удалить канал {}?").format(f"'{identifier}'")
-    await message.answer(question_text, reply_markup=keyboard)
-
-
-@router.callback_query(F.data.startswith("confirm_remove_channel_direct:"))
-async def confirm_remove_channel_cb(callback: CallbackQuery): # Переименовал для ясности
-    identifier = callback.data.split(":", 1)[1]
+@router.callback_query(F.data == "channels_list")
+async def callback_list_channels(callback: CallbackQuery):
     user_id = callback.from_user.id
-    # Нужен lang для ответа
-    user_data = supabase_db.db.ensure_user(user_id)
-    lang = user_data.get("language", "ru") if user_data else "ru"
-
-    # Для удаления канала может потребоваться project_id, если он часть ключа в БД
-    # Либо удаляем по user_id и chat_id/username
-    # Предположим, remove_channel ожидает user_id и identifier (chat_id или username)
-    result = supabase_db.db.remove_channel(user_id, identifier) # Убедитесь, что эта функция правильно работает с identifier
+    user = supabase_db.db.get_user(user_id)
+    lang = user.get("language", "ru") if user else "ru"
     
-    if result:
-        await callback.message.edit_text(TEXTS.get(lang, {}).get('channels_removed_success', "🗑 Канал удалён."))
-    else:
-        await callback.message.edit_text(TEXTS.get(lang, {}).get('channels_remove_not_found_or_error', "❌ Канал не найден или ошибка при удалении."))
-    await callback.answer()
-
-
-@router.callback_query(F.data == "cancel_remove_channel") # Переименовал для ясности
-async def cancel_remove_channel_cb(callback: CallbackQuery):
-    user_data = supabase_db.db.ensure_user(callback.from_user.id)
-    lang = user_data.get("language", "ru") if user_data else "ru"
-    await callback.message.edit_text(TEXTS.get(lang, {}).get('channels_remove_cancelled', "❌ Удаление отменено."))
-    await callback.answer()
-
-
-# -------------------------------------------------------------
-# Вывод списка каналов
-# -------------------------------------------------------------
-
-async def list_channels_direct(message_or_callback_message: Message, user_data: dict, lang: str):
-    # Эта функция может вызываться из Message handler или CallbackQuery handler
-    # message_or_callback_message может быть message или callback.message
-    user_id = user_data["id"] # Предполагая, что ensure_user возвращает dict с 'id'
-    channels = supabase_db.db.list_channels(user_id) # Предполагая, что list_channels ожидает user_id
-
-    if not channels:
-        await message_or_callback_message.answer(TEXTS.get(lang, {}).get('channels_list_empty', "У вас ещё нет добавленных каналов."))
-        return
-
-    text_lines = [TEXTS.get(lang, {}).get('channels_list_title', "📋 **Ваши каналы:**") + "\n"]
-    for ch in channels:
-        admin_marker = "✅" if ch.get("is_admin_verified") else "❓" # is_admin_verified относится к боту
-        channel_name = ch.get('name', 'Unknown Channel')
-        chat_id_val = ch.get('chat_id', 'N/A')
-        text_lines.append(f"{admin_marker} {channel_name} — `{chat_id_val}`")
-
-    final_text = "\n".join(text_lines)
-    
-    # Если это callback.message, то лучше использовать edit_text, если текст небольшой и не меняет суть сообщения
-    # Но для списка часто лучше ответить новым сообщением или отредактировать, если предыдущее было приглашением к списку.
-    # В данном случае cb_channels_list вызывает list_channels_direct с callback.message.
-    # Исходное сообщение было "🔧 Управление каналами...", так что edit_text подойдет.
-    if isinstance(message_or_callback_message, types.Message) and message_or_callback_message.from_user.id == message_or_callback_message.chat.id :
-        # Если это сообщение от пользователя (не callback) или callback, но изначальное сообщение уже не актуально
-        try: # если это callback.message
-            await message_or_callback_message.edit_text(final_text, parse_mode="Markdown", reply_markup=get_back_menu(lang))
-        except TelegramAPIError: # если это message, или edit_text невозможен
-             await message_or_callback_message.answer(final_text, parse_mode="Markdown", reply_markup=get_back_menu(lang))
-    else: # Для команды /channels list
-         await message_or_callback_message.answer(final_text, parse_mode="Markdown")
-
-
-# -------------------------------------------------------------
-# Коллбеки меню
-# -------------------------------------------------------------
-
-@router.callback_query(F.data == "channels_menu")
-async def cb_channels_menu(callback: CallbackQuery, state: FSMContext): # Добавил state для единообразия, хотя он тут не используется
-    await state.clear() # На всякий случай, если были активные состояния
-    user_data = supabase_db.db.ensure_user(callback.from_user.id)
-    lang = user_data.get("language", "ru") if user_data else "ru"
-    keyboard = get_channels_main_menu(lang)
-    text = TEXTS.get(lang, {}).get('channels_manage_title', "🔧 **Управление каналами**\n\nВыберите действие:")
-    try:
-        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
-    except TelegramAPIError as e:
-        logger.warning(f"Error editing message in cb_channels_menu: {e.description}. Sending new one.")
-        await callback.message.answer(text, reply_markup=keyboard, parse_mode="Markdown") # Если не удалось отредактировать
-    await callback.answer()
-
+    await list_channels_callback(callback, user, lang)
 
 @router.callback_query(F.data == "channels_add")
-async def cb_channels_add(callback: CallbackQuery, state: FSMContext):
-    user_data = supabase_db.db.ensure_user(callback.from_user.id)
-    lang = user_data.get("language", "ru") if user_data else "ru"
-    prompt_text = TEXTS.get(lang, {}).get('channels_add_prompt_id', "Введите ID или @username канала:")
-    try:
-        await callback.message.edit_text(prompt_text, reply_markup=get_back_menu(lang))
-    except TelegramAPIError as e:
-        logger.warning(f"Error editing message in cb_channels_add: {e.description}. Sending new one.")
-        await callback.message.answer(prompt_text, reply_markup=get_back_menu(lang))
-    await state.set_state("channels_add_waiting_id")
-    await callback.answer()
-
-
-@router.message(F.state == "channels_add_waiting_id") # Обновленный синтаксис для FSMContext.filter_state
-async def channels_add_receive_id(message: Message, state: FSMContext):
-    identifier = message.text.strip()
-    user_data = supabase_db.db.ensure_user(message.from_user.id)
-    lang = user_data.get("language", "ru") if user_data else "ru"
+async def callback_add_channel(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    user = supabase_db.db.get_user(user_id)
+    lang = user.get("language", "ru") if user else "ru"
     
-    # После добавления или ошибки, хорошо бы вернуть пользователя в меню каналов или главное меню
-    await add_channel_direct(message, user_data, lang, identifier)
-    await state.clear()
-    # Опционально: показать меню каналов снова
-    # await show_channels_menu(message, user_data, lang)
-
+    text = ("➕ **Добавление канала**\n\n"
+            "Отправьте ID канала или @username канала.\n"
+            "Например: `-1001234567890` или `@mychannel`\n\n"
+            "⚠️ **Важно:** Бот должен быть администратором канала!")
+    
+    # Кнопка отмены
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="channels_menu")]
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+    await callback.answer()
 
 @router.callback_query(F.data == "channels_remove")
-async def cb_channels_remove(callback: CallbackQuery, state: FSMContext):
-    user_data = supabase_db.db.ensure_user(callback.from_user.id)
-    lang = user_data.get("language", "ru") if user_data else "ru"
-    prompt_text = TEXTS.get(lang, {}).get('channels_remove_prompt_id', "Введите ID или @username канала для удаления:")
-    try:
-        await callback.message.edit_text(prompt_text, reply_markup=get_back_menu(lang))
-    except TelegramAPIError as e:
-        logger.warning(f"Error editing message in cb_channels_remove: {e.description}. Sending new one.")
-        await callback.message.answer(prompt_text, reply_markup=get_back_menu(lang))
-    await state.set_state("channels_remove_waiting_id")
-    await callback.answer()
-
-
-@router.message(F.state == "channels_remove_waiting_id") # Обновленный синтаксис
-async def channels_remove_receive_id(message: Message, state: FSMContext):
-    identifier = message.text.strip()
-    user_data = supabase_db.db.ensure_user(message.from_user.id)
-    lang = user_data.get("language", "ru") if user_data else "ru"
+async def callback_remove_channel(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    user = supabase_db.db.get_user(user_id)
+    lang = user.get("language", "ru") if user else "ru"
     
-    await remove_channel_direct(message, user_data, lang, identifier) # remove_channel_direct покажет свою клавиатуру подтверждения
-    await state.clear()
-    # Опционально: показать меню каналов снова
-    # await show_channels_menu(message, user_data, lang)
+    await show_channels_for_removal(callback, user, lang)
 
+@router.callback_query(F.data == "channels_check_admin")
+async def callback_check_admin_rights(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    user = supabase_db.db.get_user(user_id)
+    lang = user.get("language", "ru") if user else "ru"
+    
+    await check_admin_rights_all(callback, user, lang)
 
-@router.callback_query(F.data == "channels_list")
-async def cb_channels_list(callback: CallbackQuery, state: FSMContext): # Добавил state
-    await state.clear() # На всякий случай
-    user_data = supabase_db.db.ensure_user(callback.from_user.id)
-    lang = user_data.get("language", "ru") if user_data else "ru"
-    await list_channels_direct(callback.message, user_data, lang) # callback.message для редактирования
+@router.callback_query(F.data == "channels_menu")
+async def callback_channels_menu(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    user = supabase_db.db.get_user(user_id)
+    lang = user.get("language", "ru") if user else "ru"
+    
+    text = "🔧 **Управление каналами**\n\nВыберите действие:"
+    keyboard = get_channels_main_menu(lang)
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
     await callback.answer()
 
-# Не забудьте зарегистрировать роутер в основном файле бота:
-# dp.include_router(your_channels_router_filename.router)
+async def list_channels_callback(callback: CallbackQuery, user: dict, lang: str):
+    """Показать список каналов через callback"""
+    project_id = user.get("current_project")
+    if not project_id:
+        text = "❌ Нет активного проекта. Создайте проект через /project"
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await callback.message.edit_text(text, reply_markup=keyboard)
+        await callback.answer()
+        return
+    
+    channels = supabase_db.db.list_channels(project_id=project_id)
+    if not channels:
+        text = ("📋 **Список каналов**\n\n"
+                "❌ Каналы не найдены.\n"
+                "Добавьте канал с помощью кнопки ниже.")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Добавить канал", callback_data="channels_add")],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="channels_menu")]
+        ])
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+        await callback.answer()
+        return
+    
+    text = "📋 **Список каналов**\n\n"
+    buttons = []
+    
+    for i, channel in enumerate(channels, 1):
+        admin_status = "✅" if channel.get('is_admin_verified') else "❓"
+        text += f"{i}. {admin_status} **{channel['name']}**\n"
+        text += f"   ID: `{channel['chat_id']}`\n"
+        if channel.get('username'):
+            text += f"   @{channel['username']}\n"
+        text += "\n"
+        
+        # Кнопка для каждого канала
+        buttons.append([InlineKeyboardButton(
+            text=f"⚙️ {channel['name'][:20]}...", 
+            callback_data=f"channel_manage:{channel['id']}"
+        )])
+    
+    buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="channels_menu")])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+    await callback.answer()
 
-# Также, убедитесь, что ваша TEXTS структура корректна. Пример:
-# TEXTS = {
-#     "ru": {
-#         "channels_menu_buttons": {
-#             "add": "➕ Добавить", ...
-#         },
-#         "general_buttons": {
-#             "back": "🔙 Назад", ...
-#         },
-#         "channels_manage_title": "🔧 **Управление каналами**\n\nВыберите действие:",
-#         # ... и так далее для всех используемых ключей
-#     },
-#     "en": { ... }
-# }
+async def list_channels_direct(message: Message, user: dict, lang: str):
+    """Показать список каналов через команду"""
+    project_id = user.get("current_project")
+    if not project_id:
+        await message.answer(TEXTS[lang]['channels_no_channels'])
+        return
+    
+    channels = supabase_db.db.list_channels(project_id=project_id)
+    if not channels:
+        await message.answer(TEXTS[lang]['channels_no_channels'])
+        return
+    
+    text = TEXTS[lang]['channels_list_title'] + "\n"
+    for i, channel in enumerate(channels, 1):
+        admin_status = "✅" if channel.get('is_admin_verified') else "❓"
+        text += f"{i}. {admin_status} " + TEXTS[lang]['channels_item'].format(
+            name=channel['name'], 
+            id=channel['chat_id']
+        ) + "\n"
+    
+    await message.answer(text)
+
+async def show_channels_for_removal(callback: CallbackQuery, user: dict, lang: str):
+    """Показать каналы для удаления"""
+    project_id = user.get("current_project")
+    if not project_id:
+        text = "❌ Нет активного проекта."
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="channels_menu")]
+        ])
+        await callback.message.edit_text(text, reply_markup=keyboard)
+        await callback.answer()
+        return
+    
+    channels = supabase_db.db.list_channels(project_id=project_id)
+    if not channels:
+        text = "❌ Нет каналов для удаления."
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="channels_menu")]
+        ])
+        await callback.message.edit_text(text, reply_markup=keyboard)
+        await callback.answer()
+        return
+    
+    text = "🗑 **Удаление канала**\n\nВыберите канал для удаления:"
+    buttons = []
+    
+    for channel in channels:
+        buttons.append([InlineKeyboardButton(
+            text=f"🗑 {channel['name']}", 
+            callback_data=f"remove_channel_confirm:{channel['id']}"
+        )])
+    
+    buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="channels_menu")])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+    await callback.answer()
+
+async def check_admin_rights_all(callback: CallbackQuery, user: dict, lang: str):
+    """Проверить права администратора для всех каналов"""
+    project_id = user.get("current_project")
+    if not project_id:
+        text = "❌ Нет активного проекта."
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="channels_menu")]
+        ])
+        await callback.message.edit_text(text, reply_markup=keyboard)
+        await callback.answer()
+        return
+    
+    channels = supabase_db.db.list_channels(project_id=project_id)
+    if not channels:
+        text = "❌ Нет каналов для проверки."
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="channels_menu")]
+        ])
+        await callback.message.edit_text(text, reply_markup=keyboard)
+        await callback.answer()
+        return
+    
+    text = "🔄 **Проверка прав администратора...**\n\n"
+    await callback.message.edit_text(text, parse_mode="Markdown")
+    
+    results = []
+    for channel in channels:
+        try:
+            # Проверяем права администратора
+            chat_member = await callback.bot.get_chat_member(channel['chat_id'], callback.bot.id)
+            is_admin = chat_member.status in ['administrator', 'creator']
+            
+            # Обновляем статус в базе данных
+            supabase_db.db.update_channel_admin_status(channel['id'], is_admin)
+            
+            status = "✅ Администратор" if is_admin else "❌ Не администратор"
+            results.append(f"**{channel['name']}**: {status}")
+            
+        except Exception as e:
+            results.append(f"**{channel['name']}**: ❌ Ошибка проверки")
+    
+    text = "🔄 **Результаты проверки прав:**\n\n" + "\n".join(results)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="channels_menu")]
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+    await callback.answer()
+
+# Обработка текстовых сообщений для добавления канала
+@router.message(F.text)
+async def handle_channel_input(message: Message, state: FSMContext):
+    # Проверяем, ожидается ли ввод канала
+    # Это упрощенная логика, в реальности нужно использовать FSM states
+    text = message.text.strip()
+    
+    # Проверяем, похоже ли на ID канала или username
+    if text.startswith('@') or (text.startswith('-') and text[1:].isdigit()):
+        user_id = message.from_user.id
+        user = supabase_db.db.get_user(user_id)
+        lang = user.get("language", "ru") if user else "ru"
+        
+        await add_channel_direct(message, user, lang, text)
+
+async def add_channel_direct(message: Message, user: dict, lang: str, identifier: str):
+    """Добавить канал напрямую"""
+    project_id = user.get("current_project")
+    if not project_id:
+        await message.answer("❌ Нет активного проекта. Создайте проект через /project")
+        return
+    
+    try:
+        # Получаем информацию о чате
+        if identifier.startswith("@"):
+            chat = await message.bot.get_chat(identifier)
+        else:
+            chat_id = int(identifier)
+            chat = await message.bot.get_chat(chat_id)
+        
+        # Проверяем права пользователя в канале
+        try:
+            user_member = await message.bot.get_chat_member(chat.id, message.from_user.id)
+            user_is_admin = user_member.status in ['administrator', 'creator']
+        except:
+            user_is_admin = False
+        
+        if not user_is_admin:
+            await message.answer(
+                "❌ **Ошибка доступа**\n\n"
+                "Вы должны быть администратором канала для его добавления.",
+                parse_mode="Markdown"
+            )
+            return
+        
+        # Проверяем права бота в канале
+        try:
+            chat_member = await message.bot.get_chat_member(chat.id, message.bot.id)
+            is_admin = chat_member.status in ['administrator', 'creator']
+        except:
+            is_admin = False
+        
+        if not is_admin:
+            await message.answer(
+                "⚠️ **Внимание!** Бот не является администратором этого канала.\n"
+                "Добавить канал можно, но публикация постов будет невозможна.\n\n"
+                "Сделайте бота администратором канала и повторите проверку.",
+                parse_mode="Markdown"
+            )
+        
+        # Добавляем канал в базу данных
+        channel = supabase_db.db.add_channel(
+            user_id=message.from_user.id,
+            chat_id=chat.id,
+            name=chat.title or chat.username or str(chat.id),
+            project_id=project_id,
+            username=chat.username,
+            is_admin_verified=is_admin
+        )
+        
+        if channel:
+            status_text = "✅ с правами администратора" if is_admin else "❓ без прав администратора"
+            await message.answer(
+                f"✅ **Канал добавлен** {status_text}\n\n"
+                f"**Название:** {channel['name']}\n"
+                f"**ID:** `{channel['chat_id']}`",
+                parse_mode="Markdown"
+            )
+        else:
+            await message.answer("❌ Ошибка при добавлении канала в базу данных.")
+    
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {str(e)}")
+
+async def remove_channel_direct(message: Message, user: dict, lang: str, identifier: str):
+    """Удалить канал напрямую"""
+    project_id = user.get("current_project")
+    if not project_id:
+        await message.answer(TEXTS[lang]['channels_not_found'])
+        return
+    
+    # Создаем клавиатуру подтверждения
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Да", callback_data=f"remove_channel_direct:{identifier}"),
+            InlineKeyboardButton(text="❌ Нет", callback_data="remove_channel_cancel")
+        ]
+    ])
+    
+    await message.answer(
+        TEXTS[lang]['channels_remove_confirm'].format(name=identifier),
+        reply_markup=keyboard
+    )
+
+@router.callback_query(F.data.startswith("remove_channel_confirm:"))
+async def confirm_remove_channel(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    user = supabase_db.db.get_user(user_id)
+    lang = user.get("language", "ru") if user else "ru"
+    project_id = user.get("current_project")
+    
+    channel_id = callback.data.split(":", 1)[1]
+    
+    try:
+        # Получаем информацию о канале
+        channel = supabase_db.db.get_channel(int(channel_id))
+        if not channel:
+            await callback.message.edit_text("❌ Канал не найден.")
+            await callback.answer()
+            return
+        
+        # Удаляем канал
+        if supabase_db.db.remove_channel(project_id, channel_id):
+            await callback.message.edit_text(
+                f"✅ **Канал удален**\n\n"
+                f"**{channel['name']}** был удален из проекта.\n"
+                f"Все связанные посты также удалены.",
+                parse_mode="Markdown"
+            )
+        else:
+            await callback.message.edit_text("❌ Ошибка при удалении канала.")
+    except Exception as e:
+        await callback.message.edit_text(f"❌ Ошибка: {str(e)}")
+    
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("remove_channel_direct:"))
+async def confirm_remove_channel_direct(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    user = supabase_db.db.get_user(user_id)
+    lang = user.get("language", "ru") if user else "ru"
+    project_id = user.get("current_project")
+    
+    identifier = callback.data.split(":", 1)[1]
+    
+    if supabase_db.db.remove_channel(project_id, identifier):
+        await callback.message.edit_text(TEXTS[lang]['channels_removed'])
+    else:
+        await callback.message.edit_text(TEXTS[lang]['channels_not_found'])
+    
+    await callback.answer()
+
+@router.callback_query(F.data == "remove_channel_cancel")
+async def cancel_remove_channel(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    user = supabase_db.db.get_user(user_id)
+    lang = user.get("language", "ru") if user else "ru"
+    
+    await callback.message.edit_text(TEXTS[lang]['confirm_post_cancel'])
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("channel_manage:"))
+async def manage_specific_channel(callback: CallbackQuery):
+    """Управление конкретным каналом"""
+    user_id = callback.from_user.id
+    user = supabase_db.db.get_user(user_id)
+    lang = user.get("language", "ru") if user else "ru"
+    
+    channel_id = int(callback.data.split(":", 1)[1])
+    channel = supabase_db.db.get_channel(channel_id)
+    
+    if not channel:
+        await callback.message.edit_text("❌ Канал не найден.")
+        await callback.answer()
+        return
+    
+    admin_status = "✅ Администратор" if channel.get('is_admin_verified') else "❓ Не проверено"
+    
+    text = (f"⚙️ **Управление каналом**\n\n"
+            f"**Название:** {channel['name']}\n"
+            f"**ID:** `{channel['chat_id']}`\n"
+            f"**Статус:** {admin_status}\n")
+    
+    if channel.get('username'):
+        text += f"**Username:** @{channel['username']}\n"
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Проверить права", callback_data=f"check_admin:{channel_id}")],
+        [InlineKeyboardButton(text="📋 Посты канала", callback_data=f"channel_posts:{channel_id}")],
+        [InlineKeyboardButton(text="🗑 Удалить канал", callback_data=f"remove_channel_confirm:{channel_id}")],
+        [InlineKeyboardButton(text="🔙 К списку каналов", callback_data="channels_list")]
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("check_admin:"))
+async def check_single_channel_admin(callback: CallbackQuery):
+    """Проверить права администратора для одного канала"""
+    channel_id = int(callback.data.split(":", 1)[1])
+    channel = supabase_db.db.get_channel(channel_id)
+    
+    if not channel:
+        await callback.message.edit_text("❌ Канал не найден.")
+        await callback.answer()
+        return
+    
+    try:
+        # Проверяем права администратора
+        chat_member = await callback.bot.get_chat_member(channel['chat_id'], callback.bot.id)
+        is_admin = chat_member.status in ['administrator', 'creator']
+        
+        # Обновляем статус в базе данных
+        supabase_db.db.update_channel_admin_status(channel_id, is_admin)
+        
+        status = "✅ Администратор" if is_admin else "❌ Не администратор"
+        text = (f"🔄 **Проверка завершена**\n\n"
+                f"**Канал:** {channel['name']}\n"
+                f"**Статус:** {status}")
+        
+        if not is_admin:
+            text += "\n\n⚠️ Сделайте бота администратором для публикации постов."
+        
+    except Exception as e:
+        text = (f"❌ **Ошибка проверки**\n\n"
+                f"**Канал:** {channel['name']}\n"
+                f"**Ошибка:** {str(e)}")
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Назад", callback_data=f"channel_manage:{channel_id}")]
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("channel_posts:"))
+async def show_channel_posts(callback: CallbackQuery):
+    """Показать посты конкретного канала"""
+    channel_id = int(callback.data.split(":", 1)[1])
+    channel = supabase_db.db.get_channel(channel_id)
+    
+    if not channel:
+        await callback.message.edit_text("❌ Канал не найден.")
+        await callback.answer()
+        return
+    
+    # Получаем посты канала
+    posts = supabase_db.db.list_posts_by_channel(channel_id)
+    
+    if not posts:
+        text = f"📋 **Посты канала {channel['name']}**\n\n❌ Постов не найдено."
+    else:
+        text = f"📋 **Посты канала {channel['name']}**\n\n"
+        for i, post in enumerate(posts[:10], 1):  # Показываем только первые 10
+            status = "✅" if post.get('published') else "⏰" if post.get('publish_time') else "📝"
+            text += f"{i}. {status} {post.get('text', 'Без текста')[:30]}...\n"
+        
+        if len(posts) > 10:
+            text += f"\n... и еще {len(posts) - 10} постов"
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Назад", callback_data=f"channel_manage:{channel_id}")]
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+    await callback.answer()
