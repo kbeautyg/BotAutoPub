@@ -28,15 +28,15 @@ import start
 import help
 import projects
 
-# Улучшенные модули
+# Основные функциональные модули
 import main_menu
 import channels
-import create_post_improved  # Исправленная версия
+import create_post_fixed as create_post  # Используем исправленную версию
 import scheduled_posts
 import settings_improved
-import view_post  # Новый модуль для просмотра
+import view_post
 
-# Модули для совместимости
+# Модули для совместимости (для работы с существующими постами)
 import edit_post
 import delete_post
 
@@ -46,8 +46,8 @@ dp.include_router(start.router)
 dp.include_router(help.router)
 dp.include_router(projects.router)
 dp.include_router(channels.router)
-dp.include_router(create_post_improved.router)  # Исправленная версия
-dp.include_router(view_post.router)  # Новый модуль просмотра
+dp.include_router(create_post.router)  # Исправленная версия
+dp.include_router(view_post.router)
 dp.include_router(scheduled_posts.router)
 dp.include_router(settings_improved.router)
 dp.include_router(edit_post.router)
@@ -55,7 +55,7 @@ dp.include_router(delete_post.router)
 dp.include_router(main_menu.router)  # В конце, чтобы не перехватывал команды
 
 # Import and start the scheduler
-import auto_post
+import auto_post_fixed as auto_post
 
 async def main():
     print("🚀 Запуск бота...")
@@ -71,7 +71,15 @@ async def main():
     # Удаляем webhook если он был установлен
     await bot.delete_webhook(drop_pending_updates=True)
     
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    except Exception as e:
+        print(f"❌ Ошибка при запуске бота: {e}")
+        # Если ошибка связана с другим экземпляром бота, ждем и пробуем снова
+        if "terminated by other getUpdates request" in str(e):
+            print("⏳ Ожидание завершения другого экземпляра бота...")
+            await asyncio.sleep(5)
+            await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
