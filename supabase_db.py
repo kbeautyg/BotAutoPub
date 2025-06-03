@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from supabase import create_client, Client
 
 # Global database instance (to be set in main)
@@ -279,9 +280,25 @@ class SupabaseDB:
         self.client.table("posts").delete().eq("id", post_id).execute()
 
     def get_due_posts(self, current_time):
-        """Get all posts due at or before current_time (not published and not drafts)."""
-        now_str = current_time.strftime("%Y-%m-%dT%H:%M:%S%z") if hasattr(current_time, "strftime") else str(current_time)
-        res = self.client.table("posts").select("*").eq("published", False).eq("draft", False).lte("publish_time", now_str).execute()
+        """Get posts scheduled up to the given time (not published or drafts)."""
+        # Ensure timezone aware value and format in UTC
+        if hasattr(current_time, "tzinfo") and current_time.tzinfo is None:
+            current_time = current_time.replace(tzinfo=timezone.utc)
+        elif not hasattr(current_time, "tzinfo"):
+            # Fallback for strings or naive values
+            try:
+                current_time = datetime.fromisoformat(str(current_time))
+            except Exception:
+                current_time = datetime.now(timezone.utc)
+        now_str = current_time.astimezone(timezone.utc).isoformat()
+        res = (
+            self.client.table("posts")
+            .select("*")
+            .eq("published", False)
+            .eq("draft", False)
+            .lte("publish_time", now_str)
+            .execute()
+        )
         return res.data or []
 
     def mark_post_published(self, post_id: int):
