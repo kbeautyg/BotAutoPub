@@ -249,26 +249,35 @@ async def check_admin_rights_all(callback: CallbackQuery, user: dict, lang: str)
     
     text = "🔄 **Результаты проверки прав:**\n\n" + "\n".join(results)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="channels_menu")]
+        [InlineKeyboardButton(text="🔙 Назад", callback_data=f"channel_manage:{channel_id}")]
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+    await callback.answer()ад", callback_data="channels_menu")]
     ])
     
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
     await callback.answer()
 
-# Обработка текстовых сообщений для добавления канала
-@router.message(F.text & ~F.text.startswith('/'))
-async def handle_channel_input(message: Message, state: FSMContext):
-    # Проверяем, ожидается ли ввод канала
-    # Это упрощенная логика, в реальности нужно использовать FSM states
+# Фильтр для текстовых сообщений - только если они похожи на ID канала
+async def channel_id_filter(message):
+    """Фильтр для определения, является ли сообщение ID канала"""
+    if not message.text:
+        return False
     text = message.text.strip()
-    
     # Проверяем, похоже ли на ID канала или username
-    if text.startswith('@') or (text.startswith('-') and text[1:].isdigit()):
-        user_id = message.from_user.id
-        user = supabase_db.db.get_user(user_id)
-        lang = user.get("language", "ru") if user else "ru"
-        
-        await add_channel_direct(message, user, lang, text)
+    return text.startswith('@') or (text.startswith('-') and text[1:].isdigit())
+
+# Обработка текстовых сообщений для добавления канала (только если они похожи на ID канала)
+@router.message(F.text, channel_id_filter)
+async def handle_channel_input(message: Message, state: FSMContext):
+    """Обработка ввода ID канала"""
+    user_id = message.from_user.id
+    user = supabase_db.db.get_user(user_id)
+    lang = user.get("language", "ru") if user else "ru"
+    
+    text = message.text.strip()
+    await add_channel_direct(message, user, lang, text)
 
 async def add_channel_direct(message: Message, user: dict, lang: str, identifier: str):
     """Добавить канал напрямую"""
@@ -516,8 +525,4 @@ async def show_channel_posts(callback: CallbackQuery):
             text += f"\n... и еще {len(posts) - 10} постов"
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Назад", callback_data=f"channel_manage:{channel_id}")]
-    ])
-    
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
-    await callback.answer()
+        [InlineKeyboardButton(text="🔙 Наз
