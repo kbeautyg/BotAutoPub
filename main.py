@@ -31,7 +31,7 @@ import projects
 # Основные функциональные модули
 import main_menu
 import channels
-import create_post_fixed as create_post  # Используем исправленную версию
+import create  # Используем исправленную версию create.py
 import scheduled_posts
 import settings_improved
 import view_post
@@ -46,7 +46,7 @@ dp.include_router(start.router)
 dp.include_router(help.router)
 dp.include_router(projects.router)
 dp.include_router(channels.router)
-dp.include_router(create_post.router)  # Исправленная версия
+dp.include_router(create.router)  # Исправленная версия
 dp.include_router(view_post.router)
 dp.include_router(scheduled_posts.router)
 dp.include_router(settings_improved.router)
