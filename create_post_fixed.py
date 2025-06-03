@@ -261,7 +261,7 @@ async def start_text_step(message: Message, state: FSMContext, lang: str):
     keyboard = get_navigation_keyboard("step_text", lang, can_skip=True)
     await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
 
-@router.message(PostCreationFlow.step_text)
+@router.message(PostCreationFlow.step_text, F.text)
 async def handle_text_input(message: Message, state: FSMContext):
     """Обработка ввода текста"""
     user = supabase_db.db.get_user(message.from_user.id)
@@ -306,7 +306,7 @@ async def start_media_step(message: Message, state: FSMContext, lang: str):
     keyboard = get_navigation_keyboard("step_media", lang, can_skip=True)
     await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
 
-@router.message(PostCreationFlow.step_media)
+@router.message(PostCreationFlow.step_media, F.text | F.photo | F.video | F.animation)
 async def handle_media_input(message: Message, state: FSMContext):
     """Обработка медиа или команд"""
     user = supabase_db.db.get_user(message.from_user.id)
@@ -383,7 +383,7 @@ async def start_format_step(message: Message, state: FSMContext, lang: str):
     keyboard = get_format_keyboard(lang)
     await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
 
-@router.message(PostCreationFlow.step_format)
+@router.message(PostCreationFlow.step_format, F.text)
 async def handle_format_text_input(message: Message, state: FSMContext):
     """Обработка текстового выбора формата"""
     user = supabase_db.db.get_user(message.from_user.id)
@@ -479,7 +479,7 @@ async def start_buttons_step(message: Message, state: FSMContext, lang: str):
     keyboard = get_navigation_keyboard("step_buttons", lang, can_skip=True)
     await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
 
-@router.message(PostCreationFlow.step_buttons)
+@router.message(PostCreationFlow.step_buttons, F.text)
 async def handle_buttons_input(message: Message, state: FSMContext):
     """Обработка ввода кнопок"""
     user = supabase_db.db.get_user(message.from_user.id)
@@ -566,7 +566,7 @@ async def start_time_step(message: Message, state: FSMContext, lang: str):
     keyboard = get_time_options_keyboard(lang)
     await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
 
-@router.message(PostCreationFlow.step_time)
+@router.message(PostCreationFlow.step_time, F.text)
 async def handle_time_text_input(message: Message, state: FSMContext):
     """Обработка текстового ввода времени"""
     user = supabase_db.db.get_user(message.from_user.id)
@@ -722,7 +722,7 @@ async def start_channel_step(message: Message, state: FSMContext, lang: str):
     keyboard = get_channels_keyboard(channels, lang)
     await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
 
-@router.message(PostCreationFlow.step_channel)
+@router.message(PostCreationFlow.step_channel, F.text)
 async def handle_channel_text_input(message: Message, state: FSMContext):
     """Обработка текстового выбора канала"""
     user = supabase_db.db.get_user(message.from_user.id)
@@ -835,7 +835,7 @@ async def start_preview_step(message: Message, state: FSMContext, lang: str):
     keyboard = get_preview_keyboard(lang)
     await message.answer(info_text, reply_markup=keyboard, parse_mode="Markdown")
 
-@router.message(PostCreationFlow.step_preview)
+@router.message(PostCreationFlow.step_preview, F.text)
 async def handle_preview_text_input(message: Message, state: FSMContext):
     """Обработка текстовых команд в предпросмотре"""
     user = supabase_db.db.get_user(message.from_user.id)
@@ -1034,13 +1034,10 @@ async def handle_edit_menu_text(message: Message, state: FSMContext, is_callback
     else:
         await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
 
-@router.message(lambda message: message.text and message.text.lower().strip() in ["text", "media", "format", "buttons", "time", "channel"])
-async def handle_edit_field_text(message: Message, state: FSMContext):
+# Обработчик текстовых команд редактирования (только в режиме редактирования)
+@router.message(PostCreationFlow.step_preview, F.text & lambda message: message.text.lower().strip() in ["text", "media", "format", "buttons", "time", "channel"])
+async def handle_edit_field_text_specific(message: Message, state: FSMContext):
     """Обработка текстовых команд редактирования"""
-    current_state = await state.get_state()
-    if current_state != PostCreationFlow.step_preview:
-        return
-    
     data = await state.get_data()
     if not data.get("editing_mode"):
         return
