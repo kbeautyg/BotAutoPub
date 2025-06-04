@@ -88,9 +88,10 @@ def format_post_preview(post: dict, user: dict = None) -> str:
     if post.get('channels'):
         text += f"📺 **Канал:** {post['channels']['name']}\n"
     
-    # Формат
-    if post.get('parse_mode'):
-        text += f"🎨 **Формат:** {post['parse_mode']}\n"
+    # Формат текста
+    fmt = post.get('format') or post.get('parse_mode')
+    if fmt:
+        text += f"🎨 **Формат:** {fmt}\n"
     
     text += "\n" + "─" * 30 + "\n\n"
     
