@@ -19,6 +19,7 @@ class SupabaseDB:
         except Exception:
             # Attempt to create missing tables and columns via SQL
             schema_sql = """
+            -- Create tables if they don't exist
             CREATE TABLE IF NOT EXISTS users (
                 user_id BIGINT PRIMARY KEY,
                 timezone TEXT DEFAULT 'UTC',
@@ -26,40 +27,135 @@ class SupabaseDB:
                 date_format TEXT DEFAULT 'YYYY-MM-DD',
                 time_format TEXT DEFAULT 'HH:MM',
                 notify_before INTEGER DEFAULT 0,
-                current_project BIGINT
+                current_project BIGINT,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             );
+            
             CREATE TABLE IF NOT EXISTS projects (
                 id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-                name TEXT,
-                owner_id BIGINT
+                name TEXT NOT NULL,
+                owner_id BIGINT,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             );
+            
             CREATE TABLE IF NOT EXISTS user_projects (
                 user_id BIGINT,
                 project_id BIGINT,
-                role TEXT,
+                role TEXT DEFAULT 'admin',
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 PRIMARY KEY (user_id, project_id)
             );
-            ALTER TABLE user_projects
-              ADD FOREIGN KEY (user_id) REFERENCES users(user_id),
-              ADD FOREIGN KEY (project_id) REFERENCES projects(id);
-            ALTER TABLE channels 
-              ADD COLUMN IF NOT EXISTS project_id BIGINT;
-            ALTER TABLE posts 
-              ADD COLUMN IF NOT EXISTS project_id BIGINT;
-            ALTER TABLE channels 
-              DROP CONSTRAINT IF EXISTS channels_user_id_chat_id_key;
-            ALTER TABLE channels 
-              ADD CONSTRAINT channels_project_chat_unique UNIQUE(project_id, chat_id);
-            ALTER TABLE channels 
-              ADD FOREIGN KEY (project_id) REFERENCES projects(id);
-            ALTER TABLE posts 
-              ADD FOREIGN KEY (project_id) REFERENCES projects(id);
+            
+            CREATE TABLE IF NOT EXISTS channels (
+                id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                user_id BIGINT,
+                project_id BIGINT,
+                name TEXT NOT NULL,
+                chat_id BIGINT NOT NULL,
+                username TEXT,
+                is_admin_verified BOOLEAN DEFAULT FALSE,
+                admin_check_date TIMESTAMP WITH TIME ZONE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+            
+            CREATE TABLE IF NOT EXISTS posts (
+                id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                user_id BIGINT,
+                project_id BIGINT,
+                channel_id BIGINT,
+                chat_id BIGINT,
+                text TEXT,
+                media_type TEXT,
+                media_id TEXT,
+                parse_mode TEXT DEFAULT 'HTML',
+                buttons JSONB,
+                publish_time TIMESTAMP WITH TIME ZONE,
+                repeat_interval INTEGER DEFAULT 0,
+                draft BOOLEAN DEFAULT FALSE,
+                published BOOLEAN DEFAULT FALSE,
+                notified BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+            
+            CREATE TABLE IF NOT EXISTS notification_settings (
+                user_id BIGINT PRIMARY KEY,
+                post_published BOOLEAN DEFAULT TRUE,
+                post_failed BOOLEAN DEFAULT TRUE,
+                daily_summary BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+            
+            -- Add missing columns if they don't exist
+            DO $$ 
+            BEGIN
+                -- Add project_id to channels if missing
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='channels' AND column_name='project_id') THEN
+                    ALTER TABLE channels ADD COLUMN project_id BIGINT;
+                END IF;
+                
+                -- Add project_id to posts if missing
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='posts' AND column_name='project_id') THEN
+                    ALTER TABLE posts ADD COLUMN project_id BIGINT;
+                END IF;
+                
+                -- Rename format to parse_mode if format exists
+                IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='posts' AND column_name='format') THEN
+                    ALTER TABLE posts RENAME COLUMN format TO parse_mode;
+                END IF;
+                
+                -- Add parse_mode if missing
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='posts' AND column_name='parse_mode') THEN
+                    ALTER TABLE posts ADD COLUMN parse_mode TEXT DEFAULT 'HTML';
+                END IF;
+                
+                -- Add other missing columns
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='posts' AND column_name='notified') THEN
+                    ALTER TABLE posts ADD COLUMN notified BOOLEAN DEFAULT FALSE;
+                END IF;
+                
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='channels' AND column_name='is_admin_verified') THEN
+                    ALTER TABLE channels ADD COLUMN is_admin_verified BOOLEAN DEFAULT FALSE;
+                END IF;
+                
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='channels' AND column_name='admin_check_date') THEN
+                    ALTER TABLE channels ADD COLUMN admin_check_date TIMESTAMP WITH TIME ZONE;
+                END IF;
+                
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='created_at') THEN
+                    ALTER TABLE users ADD COLUMN created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+                END IF;
+            END $$;
+            
+            -- Create constraints and indexes
+            DO $$
+            BEGIN
+                -- Foreign key constraints
+                IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='user_projects_user_id_fkey') THEN
+                    ALTER TABLE user_projects ADD CONSTRAINT user_projects_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(user_id);
+                END IF;
+                
+                IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='user_projects_project_id_fkey') THEN
+                    ALTER TABLE user_projects ADD CONSTRAINT user_projects_project_id_fkey FOREIGN KEY (project_id) REFERENCES projects(id);
+                END IF;
+                
+                IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='channels_project_id_fkey') THEN
+                    ALTER TABLE channels ADD CONSTRAINT channels_project_id_fkey FOREIGN KEY (project_id) REFERENCES projects(id);
+                END IF;
+                
+                IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='posts_project_id_fkey') THEN
+                    ALTER TABLE posts ADD CONSTRAINT posts_project_id_fkey FOREIGN KEY (project_id) REFERENCES projects(id);
+                END IF;
+                
+                -- Unique constraints
+                IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='channels_project_chat_unique') THEN
+                    ALTER TABLE channels ADD CONSTRAINT channels_project_chat_unique UNIQUE(project_id, chat_id);
+                END IF;
+            END $$;
             """
             try:
                 self.client.postgrest.rpc("sql", {"sql": schema_sql}).execute()
-            except Exception:
-                # If unable to create/alter via API (e.g., insufficient permissions)
-                pass
+            except Exception as e:
+                print(f"Warning: Could not execute schema SQL: {e}")
 
     # User management
     def get_user(self, user_id: int):
@@ -244,10 +340,25 @@ class SupabaseDB:
     # Post management
     def add_post(self, post_data: dict):
         """Insert a new post into the database. Returns the inserted record."""
+        # Handle the format/parse_mode field properly
+        if "format" in post_data:
+            post_data["parse_mode"] = post_data.pop("format")
+        
+        # Ensure parse_mode has a valid value
+        if not post_data.get("parse_mode"):
+            post_data["parse_mode"] = "HTML"
+        
         if "buttons" in post_data and isinstance(post_data["buttons"], list):
             post_data["buttons"] = json.dumps(post_data["buttons"])
-        res = self.client.table("posts").insert(post_data).execute()
-        return res.data[0] if res.data else None
+        
+        print(f"Inserting post data: {post_data}")  # Debug log
+        
+        try:
+            res = self.client.table("posts").insert(post_data).execute()
+            return res.data[0] if res.data else None
+        except Exception as e:
+            print(f"Error inserting post: {e}")
+            raise
 
     def get_post(self, post_id: int):
         """Retrieve a single post by id."""
@@ -270,6 +381,10 @@ class SupabaseDB:
 
     def update_post(self, post_id: int, updates: dict):
         """Update fields of a post and return the updated record."""
+        # Handle the format/parse_mode field properly
+        if "format" in updates:
+            updates["parse_mode"] = updates.pop("format")
+        
         if "buttons" in updates and isinstance(updates["buttons"], list):
             updates["buttons"] = json.dumps(updates["buttons"])
         res = self.client.table("posts").update(updates).eq("id", post_id).execute()
