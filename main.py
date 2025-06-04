@@ -36,9 +36,9 @@ import create  # Используем исправленную версию crea
 import scheduled_posts
 import settings_improved
 import view_post
-import list_posts  # Новый модуль для списка постов
-import edit_post_improved  # Новая улучшенная версия
-import edit_post  # Старая версия для обратной совместимости
+
+# Модули для совместимости (для работы с существующими постами)
+import edit_post
 import delete_post
 
 # Регистрируем роутеры в правильном порядке
@@ -49,15 +49,31 @@ dp.include_router(projects.router)
 dp.include_router(channels.router)
 dp.include_router(create.router)  # Исправленная версия
 dp.include_router(view_post.router)
-dp.include_router(list_posts.router)  # Новый модуль списка
 dp.include_router(scheduled_posts.router)
 dp.include_router(settings_improved.router)
-dp.include_router(edit_post_improved.router)  # Новая версия редактирования
-dp.include_router(edit_post.router)  # Старая версия для совместимости
+dp.include_router(edit_post.router)
 dp.include_router(delete_post.router)
 dp.include_router(main_menu.router)  # В конце, чтобы не перехватывал команды
 
 # Глобальные обработчики callback'ов для управления постами
+@dp.callback_query(F.data.startswith("post_edit_cmd:"))
+async def callback_edit_post_global(callback: CallbackQuery):
+    """Глобальный обработчик команды редактирования поста"""
+    post_id = int(callback.data.split(":", 1)[1])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
+    
+    await callback.message.answer(
+        f"✏️ **Редактирование поста #{post_id}**\n\n"
+        f"Используйте команду `/edit {post_id}` для редактирования поста.",
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
 @dp.callback_query(F.data.startswith("post_publish_cmd:"))
 async def callback_publish_post_global(callback: CallbackQuery):
     """Глобальный обработчик команды публикации поста"""
@@ -90,7 +106,7 @@ async def callback_publish_post_global(callback: CallbackQuery):
     
     # Создаем клавиатуру с действиями
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_view:{post_id}")],
+        [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_full_view:{post_id}")],
         [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
@@ -177,6 +193,69 @@ async def callback_confirm_delete_post_global(callback: CallbackQuery):
             parse_mode="Markdown"
         )
     
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("post_full_view:"))
+async def callback_full_view_post_global(callback: CallbackQuery):
+    """Глобальный обработчик полного просмотра поста"""
+    user_id = callback.from_user.id
+    user = supabase_db.db.get_user(user_id)
+    
+    post_id = int(callback.data.split(":", 1)[1])
+    post = supabase_db.db.get_post(post_id)
+    
+    if not post:
+        await callback.answer("Пост не найден!")
+        return
+    
+    # Проверяем доступ
+    if not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
+        await callback.answer("У вас нет доступа к этому посту!")
+        return
+    
+    # Импортируем функции для просмотра
+    from view_post import send_post_preview, format_time_for_user
+    
+    # Отправляем полный превью поста
+    await send_post_preview(callback.message, post)
+    
+    # Отправляем информацию с кнопками
+    channel = supabase_db.db.get_channel(post['channel_id'])
+    channel_name = channel['name'] if channel else 'Неизвестный канал'
+    
+    info_text = f"👀 **Полный просмотр поста #{post_id}**\n\n"
+    info_text += f"📺 **Канал:** {channel_name}\n"
+    
+    if post.get('published'):
+        info_text += "✅ **Статус:** Опубликован\n"
+    elif post.get('draft'):
+        info_text += "📝 **Статус:** Черновик\n"
+    elif post.get('publish_time'):
+        formatted_time = format_time_for_user(post['publish_time'], user)
+        user_tz = user.get('timezone', 'UTC')
+        info_text += f"⏰ **Запланировано:** {formatted_time} ({user_tz})\n"
+    
+    # Создаем клавиатуру действий
+    buttons = []
+    
+    if not post.get('published'):
+        buttons.append([
+            InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_cmd:{post_id}"),
+            InlineKeyboardButton(text="🚀 Опубликовать", callback_data=f"post_publish_cmd:{post_id}")
+        ])
+        buttons.append([
+            InlineKeyboardButton(text="📅 Перенести", callback_data=f"post_reschedule_cmd:{post_id}"),
+            InlineKeyboardButton(text="🗑 Удалить", callback_data=f"post_delete_cmd:{post_id}")
+        ])
+    
+    buttons.append([
+        InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu"),
+        InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+    ])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    
+    await callback.message.answer(info_text, parse_mode="Markdown", reply_markup=keyboard)
     await callback.answer()
 
 # Import and start the scheduler

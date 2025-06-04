@@ -6,4 +6,3 @@ asyncio-mqtt>=0.16.0
 schedule>=1.2.0
 pytz>=2023.3
 zoneinfo-backport>=0.2.1; python_version<"3.9"
-tzdata>=2023.3
