@@ -455,6 +455,15 @@ async def handle_edit_text_input(message: Message, state: FSMContext):
     await show_edit_menu(message, post_id, user_id, "ru")
     await state.clear()
 
+@router.message(EditPost.time, Command("skip"))
+async def skip_edit_time(message: Message, state: FSMContext):
+    """Пропустить редактирование времени"""
+    data = await state.get_data()
+    orig_post = data.get("orig_post", {})
+    # Оставляем текущее время без изменений
+    await state.update_data(new_publish_time=orig_post.get("publish_time"))
+    await ask_edit_repeat(message, state)
+
 @router.message(PostCreationFlow.step_media, F.photo | F.video | F.animation)
 async def handle_edit_media_input(message: Message, state: FSMContext):
     """Обработка нового медиа"""
