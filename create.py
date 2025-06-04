@@ -226,7 +226,7 @@ async def cmd_quick_post(message: Message, state: FSMContext):
         "project_id": project_id,
         "channel_id": channel['id'],
         "text": text,
-        "format": "HTML",
+        "parse_mode": "HTML",
         "publish_time": publish_time.isoformat() if publish_time else None,
         "draft": draft,
         "published": False
@@ -953,7 +953,7 @@ async def handle_post_confirmation_text(message: Message, state: FSMContext, is_
             "text": data.get("text"),
             "media_type": data.get("media_type"),
             "media_id": data.get("media_file_id"),
-            "format": data.get("parse_mode"),
+            "parse_mode": data.get("parse_mode", "HTML"),
             "buttons": data.get("buttons"),
             "repeat_interval": data.get("repeat_interval"),
             "draft": data.get("draft", False),
