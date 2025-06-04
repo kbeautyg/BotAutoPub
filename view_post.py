@@ -4,8 +4,75 @@ from aiogram.filters import Command
 import supabase_db
 from __init__ import TEXTS
 import json
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 router = Router()
+
+def format_time_for_user(time_str: str, user: dict) -> str:
+    """Форматировать время для отображения пользователю в его часовом поясе"""
+    try:
+        # Парсим время из ISO формата
+        if isinstance(time_str, str):
+            if time_str.endswith('Z'):
+                time_str = time_str[:-1] + '+00:00'
+            utc_time = datetime.fromisoformat(time_str)
+        else:
+            utc_time = time_str
+        
+        # Получаем часовой пояс пользователя
+        user_tz_name = user.get('timezone', 'UTC')
+        try:
+            user_tz = ZoneInfo(user_tz_name)
+            local_time = utc_time.astimezone(user_tz)
+        except:
+            local_time = utc_time
+            user_tz_name = 'UTC'
+        
+        # Форматируем согласно настройкам пользователя
+        date_format = user.get('date_format', 'YYYY-MM-DD')
+        time_format = user.get('time_format', 'HH:MM')
+        
+        # Конвертируем формат в strftime
+        if date_format == 'DD.MM.YYYY':
+            date_str = local_time.strftime('%d.%m.%Y')
+        elif date_format == 'DD/MM/YYYY':
+            date_str = local_time.strftime('%d/%m/%Y')
+        elif date_format == 'MM/DD/YYYY':
+            date_str = local_time.strftime('%m/%d/%Y')
+        else:  # YYYY-MM-DD
+            date_str = local_time.strftime('%Y-%m-%d')
+        
+        if time_format == 'hh:MM AM':
+            time_str = local_time.strftime('%I:%M %p')
+        else:  # HH:MM
+            time_str = local_time.strftime('%H:%M')
+        
+        return f"{date_str} {time_str} ({user_tz_name})"
+    except Exception as e:
+        # Fallback на оригинальную строку
+        return str(time_str)
+
+def get_post_management_keyboard(post_id: int, is_published: bool = False) -> InlineKeyboardMarkup:
+    """Создать клавиатуру управления постом"""
+    buttons = []
+    
+    if not is_published:
+        buttons.append([
+            InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_cmd:{post_id}"),
+            InlineKeyboardButton(text="🚀 Опубликовать", callback_data=f"post_publish_cmd:{post_id}")
+        ])
+        buttons.append([
+            InlineKeyboardButton(text="📅 Перенести", callback_data=f"post_reschedule_cmd:{post_id}"),
+            InlineKeyboardButton(text="🗑 Удалить", callback_data=f"post_delete_cmd:{post_id}")
+        ])
+    
+    buttons.append([
+        InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu"),
+        InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+    ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 @router.message(Command("view"))
 async def cmd_view_post(message: Message):
@@ -58,32 +125,27 @@ async def cmd_view_post(message: Message):
     elif post.get("draft"):
         info_text += "**Статус:** 📝 Черновик\n"
     elif post.get("publish_time"):
-        info_text += f"**Статус:** ⏰ Запланирован на {post['publish_time']}\n"
+        formatted_time = format_time_for_user(post['publish_time'], user)
+        info_text += f"**Статус:** ⏰ Запланирован на {formatted_time}\n"
     
-    if post.get("format"):
-        info_text += f"**Формат:** {post['format']}\n"
+    parse_mode_value = post.get("parse_mode") or post.get("format")
+    if parse_mode_value:
+        info_text += f"**Формат:** {parse_mode_value}\n"
     
     if post.get("repeat_interval") and post["repeat_interval"] > 0:
         info_text += f"**Повтор:** каждые {format_interval(post['repeat_interval'])}\n"
     
-    info_text += f"\n**Команды:**\n"
+    # Добавляем кнопки управления
+    keyboard = get_post_management_keyboard(post_id, post.get("published", False))
     
-    if not post.get("published"):
-        info_text += f"• `/edit {post_id}` - редактировать\n"
-        info_text += f"• `/publish {post_id}` - опубликовать сейчас\n"
-        info_text += f"• `/reschedule {post_id} YYYY-MM-DD HH:MM` - перенести\n"
-        info_text += f"• `/delete {post_id}` - удалить\n"
-    
-    info_text += f"• `/list` - список всех постов"
-    
-    await message.answer(info_text, parse_mode="Markdown")
+    await message.answer(info_text, parse_mode="Markdown", reply_markup=keyboard)
 
 async def send_post_preview(message: Message, post: dict, channel: dict = None):
     """Отправить превью поста"""
     text = post.get("text", "")
     media_id = post.get("media_id")
     media_type = post.get("media_type")
-    format_type = post.get("format")
+    format_type = post.get("parse_mode") or post.get("format")
     buttons = post.get("buttons")
     
     # Определяем parse_mode
@@ -202,19 +264,23 @@ async def cmd_publish_now(message: Message):
         return
     
     # Обновляем время публикации на текущее
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-    
     now = datetime.now(ZoneInfo("UTC"))
     supabase_db.db.update_post(post_id, {
         "publish_time": now,
         "draft": False
     })
     
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_view:{post_id}")],
+        [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
+    
     await message.answer(
         f"🚀 **Пост #{post_id} поставлен в очередь**\n\n"
         f"Пост будет опубликован в ближайшее время.",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=keyboard
     )
 
 @router.message(Command("reschedule"))
@@ -258,9 +324,6 @@ async def cmd_reschedule_post(message: Message):
         return
     
     # Парсим новое время
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-    
     try:
         dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
         tz = ZoneInfo(user.get("timezone", "UTC"))
@@ -279,10 +342,17 @@ async def cmd_reschedule_post(message: Message):
             "notified": False
         })
         
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_view:{post_id}")],
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        
         await message.answer(
             f"✅ **Пост #{post_id} перенесен**\n\n"
             f"Новое время публикации: {date_str} {time_str} ({user.get('timezone', 'UTC')})",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=keyboard
         )
         
     except ValueError as e:
