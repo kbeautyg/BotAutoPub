@@ -110,9 +110,24 @@ async def callback_main_menu(callback: CallbackQuery):
     await callback.answer()
 
 @router.callback_query(F.data == "menu_create_post")
-async def callback_create_post(callback: CallbackQuery):
-    """Создать пост"""
-    await callback.message.answer("Используйте команду /create для создания нового поста.")
+async def callback_create_post(callback: CallbackQuery, state: FSMContext):
+    """Создать пост - сразу запускаем процесс"""
+    from create import cmd_create_post
+    # Создаем фейковое сообщение с командой для переиспользования логики
+    fake_message = callback.message
+    fake_message.text = "/create"
+    fake_message.from_user = callback.from_user
+    await cmd_create_post(fake_message, state)
+    await callback.answer()
+
+@router.callback_query(F.data == "menu_create_post_direct")
+async def callback_create_post_direct(callback: CallbackQuery, state: FSMContext):
+    """Создать пост напрямую из списка"""
+    from create import cmd_create_post
+    fake_message = callback.message
+    fake_message.text = "/create"
+    fake_message.from_user = callback.from_user
+    await cmd_create_post(fake_message, state)
     await callback.answer()
 
 @router.callback_query(F.data == "menu_posts")
