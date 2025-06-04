@@ -38,7 +38,7 @@ async def start_scheduler(bot: Bot, check_interval: int = 5):
                 text = post.get("text") or ""
                 media_id = post.get("media_id")
                 media_type = post.get("media_type")
-                fmt = post.get("format") or ""
+                parse_mode_field = post.get("parse_mode") or post.get("format") or ""
                 buttons = []
                 markup = None
                 
@@ -66,9 +66,9 @@ async def start_scheduler(bot: Bot, check_interval: int = 5):
                 
                 # Determine parse mode
                 parse_mode = None
-                if fmt.lower() == "markdown":
+                if parse_mode_field and parse_mode_field.lower() == "markdown":
                     parse_mode = "Markdown"
-                elif fmt.lower() == "html":
+                elif parse_mode_field and parse_mode_field.lower() == "html":
                     parse_mode = "HTML"
                 
                 # Try to publish
