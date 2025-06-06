@@ -57,7 +57,12 @@ def get_posts_list_keyboard(has_scheduled: bool = False, has_drafts: bool = Fals
 async def cmd_list_posts(message: Message):
     """Показать список всех постов"""
     user_id = message.from_user.id
-    user = supabase_db.db.ensure_user(user_id)  # Обеспечиваем создание пользователя
+    
+    # Используем get_user вместо ensure_user для получения существующего пользователя
+    user = supabase_db.db.get_user(user_id)
+    if not user:
+        # Если пользователя нет, создаем его
+        user = supabase_db.db.ensure_user(user_id)
     
     project_id = user.get("current_project") if user else None
     
@@ -183,7 +188,12 @@ async def cmd_list_posts(message: Message):
 async def callback_posts_menu(callback: CallbackQuery):
     """Показать меню постов через callback"""
     user_id = callback.from_user.id
-    user = supabase_db.db.ensure_user(user_id)  # Обеспечиваем создание пользователя
+    
+    # Используем get_user вместо ensure_user
+    user = supabase_db.db.get_user(user_id)
+    if not user:
+        # Создаем пользователя только если его нет
+        user = supabase_db.db.ensure_user(user_id)
     
     project_id = user.get("current_project") if user else None
     
@@ -276,7 +286,9 @@ async def callback_posts_menu(callback: CallbackQuery):
 async def callback_posts_scheduled(callback: CallbackQuery):
     """Показать запланированные посты"""
     user_id = callback.from_user.id
-    user = supabase_db.db.ensure_user(user_id)
+    user = supabase_db.db.get_user(user_id)
+    if not user:
+        user = supabase_db.db.ensure_user(user_id)
     
     project_id = user.get("current_project") if user else None
     
@@ -348,7 +360,9 @@ async def callback_posts_scheduled(callback: CallbackQuery):
 async def callback_posts_drafts(callback: CallbackQuery):
     """Показать черновики"""
     user_id = callback.from_user.id
-    user = supabase_db.db.ensure_user(user_id)
+    user = supabase_db.db.get_user(user_id)
+    if not user:
+        user = supabase_db.db.ensure_user(user_id)
     
     project_id = user.get("current_project") if user else None
     
@@ -419,7 +433,9 @@ async def callback_posts_drafts(callback: CallbackQuery):
 async def callback_posts_published(callback: CallbackQuery):
     """Показать опубликованные посты"""
     user_id = callback.from_user.id
-    user = supabase_db.db.ensure_user(user_id)
+    user = supabase_db.db.get_user(user_id)
+    if not user:
+        user = supabase_db.db.ensure_user(user_id)
     
     project_id = user.get("current_project") if user else None
     
@@ -487,7 +503,9 @@ async def callback_view_post(callback: CallbackQuery):
     """Просмотр поста через callback"""
     post_id = int(callback.data.split(":")[-1])
     user_id = callback.from_user.id
-    user = supabase_db.db.ensure_user(user_id)
+    user = supabase_db.db.get_user(user_id)
+    if not user:
+        user = supabase_db.db.ensure_user(user_id)
     
     post = supabase_db.db.get_post(post_id)
     if not post:
