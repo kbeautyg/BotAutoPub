@@ -32,13 +32,13 @@ import projects
 # Основные функциональные модули
 import main_menu
 import channels
-import scheduled_posts as create  # Используем улучшенную версию scheduled_posts.py вместо create.py
+import scheduled_posts as create  # Используем исправленную версию
 import list_posts  # Импортируем list_posts для работы со списками
 import settings_improved
 import view_post
 
 # Улучшенные модули
-import edit_post  # Используем новый улучшенный редактор
+import edit_post_improved  # Используем новый улучшенный редактор
 
 # Модули для совместимости (для работы с существующими постами)
 import delete_post
@@ -288,7 +288,7 @@ async def callback_create_post_direct(callback: CallbackQuery):
     state = FSMContext(storage=storage, key=f"user:{callback.from_user.id}")
     
     # Вызываем команду создания
-    from scheduled_posts import cmd_create_post
+    from scheduled_posts_fixed import cmd_create_post
     await cmd_create_post(fake_message, state)
     
     await callback.answer("Запущено создание поста")
