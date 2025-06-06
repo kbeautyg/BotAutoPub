@@ -56,6 +56,41 @@ dp.include_router(settings_improved.router)
 dp.include_router(edit_post.router)  # Новый улучшенный редактор
 dp.include_router(main_menu.router)  # В конце, чтобы не перехватывал команды
 
+
+
+@dp.error()
+async def error_handler(event, exception):
+    """Глобальный обработчик ошибок"""
+    import traceback
+    import logging
+    
+    # Логируем ошибку
+    logging.error(f"Error in update {event}: {exception}")
+    traceback.print_exc()
+    
+    # Пытаемся отправить пользователю уведомление об ошибке
+    try:
+        if hasattr(event, 'message') and event.message:
+            await event.message.answer(
+                "❌ **Произошла ошибка**\n\n"
+                "Попробуйте еще раз или обратитесь к администратору.",
+                parse_mode="Markdown"
+            )
+        elif hasattr(event, 'callback_query') and event.callback_query:
+            await event.callback_query.answer("❌ Произошла ошибка. Попробуйте еще раз.")
+            try:
+                await event.callback_query.message.edit_text(
+                    "❌ **Произошла ошибка**\n\n"
+                    "Попробуйте еще раз или обратитесь к администратору.",
+                    parse_mode="Markdown"
+                )
+            except:
+                pass
+    except Exception as e:
+        print(f"Error in error handler: {e}")
+    
+    return True  # Обработано
+
 # Улучшенные глобальные обработчики для редактирования
 @dp.callback_query(F.data.startswith("edit_field:"))
 async def callback_edit_field_global(callback: CallbackQuery, state: FSMContext):
