@@ -121,7 +121,7 @@ def get_post_actions_keyboard(post_id: int, is_scheduled: bool = False):
     # Если пост запланирован, предлагаем редактирование
     if is_scheduled:
         buttons.append([
-            InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_cmd:{post_id}"),
+            InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_direct:{post_id}"),
             InlineKeyboardButton(text="🗑 Удалить", callback_data=f"post_delete_cmd:{post_id}")
         ])
     
@@ -137,7 +137,7 @@ def get_edit_offer_keyboard(post_id: int, lang: str = "ru"):
     """Клавиатура предложения редактирования для запланированного поста"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✏️ Да, редактировать", callback_data=f"post_edit_cmd:{post_id}"),
+            InlineKeyboardButton(text="✏️ Да, редактировать", callback_data=f"post_edit_direct:{post_id}"),
             InlineKeyboardButton(text="✅ Нет, всё хорошо", callback_data="edit_offer_decline")
         ]
     ])
@@ -170,16 +170,28 @@ async def cmd_create_post(message: Message, state: FSMContext):
     # Проверяем наличие проекта
     project_id = user.get("current_project")
     if not project_id:
-        await message.answer("❌ Нет активного проекта. Создайте проект через /project")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📁 Создать проект", callback_data="proj_new")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer(
+            "❌ Нет активного проекта. Создайте проект через /project",
+            reply_markup=keyboard
+        )
         return
     
     # Проверяем наличие каналов
     channels = supabase_db.db.list_channels(project_id=project_id)
     if not channels:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📺 Добавить канал", callback_data="channels_add")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
         await message.answer(
             "❌ **Нет доступных каналов**\n\n"
             "Сначала добавьте канал через /channels",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=keyboard
         )
         return
     
@@ -211,12 +223,20 @@ async def cmd_quick_post(message: Message, state: FSMContext):
     project_id = user.get("current_project")
     
     if not project_id:
-        await message.answer("❌ Нет активного проекта")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📁 Создать проект", callback_data="proj_new")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer("❌ Нет активного проекта", reply_markup=keyboard)
         return
     
     # Парсим аргументы
     parts = message.text.split(maxsplit=3)
     if len(parts) < 4:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📝 Создать пост", callback_data="menu_create_post_direct")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
         await message.answer(
             "📝 **Быстрое создание поста**\n\n"
             "Формат: `/quickpost <канал> <время> <текст>`\n\n"
@@ -226,7 +246,8 @@ async def cmd_quick_post(message: Message, state: FSMContext):
             "• `/quickpost 2 2024-12-25_15:30 Запланированный пост`\n\n"
             "Канал: @username, ID или номер в списке\n"
             "Время: now, draft или YYYY-MM-DD_HH:MM",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=keyboard
         )
         return
     
@@ -251,7 +272,11 @@ async def cmd_quick_post(message: Message, state: FSMContext):
                 break
     
     if not channel:
-        await message.answer(f"❌ Канал '{channel_ref}' не найден")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📺 Управление каналами", callback_data="channels_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer(f"❌ Канал '{channel_ref}' не найден", reply_markup=keyboard)
         return
     
     # Парсим время
@@ -269,7 +294,14 @@ async def cmd_quick_post(message: Message, state: FSMContext):
             local_dt = dt.replace(tzinfo=tz)
             publish_time = local_dt.astimezone(ZoneInfo("UTC"))
         except ValueError:
-            await message.answer("❌ Неверный формат времени. Используйте: YYYY-MM-DD_HH:MM")
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📝 Создать пост", callback_data="menu_create_post_direct")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ])
+            await message.answer(
+                "❌ Неверный формат времени. Используйте: YYYY-MM-DD_HH:MM",
+                reply_markup=keyboard
+            )
             return
     
     # Создаем пост
@@ -301,7 +333,11 @@ async def cmd_quick_post(message: Message, state: FSMContext):
             reply_markup=keyboard
         )
     else:
-        await message.answer("❌ Ошибка создания поста")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="menu_create_post_direct")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer("❌ Ошибка создания поста", reply_markup=keyboard)
 
 async def start_text_step(message: Message, state: FSMContext, lang: str):
     """Шаг 1: Ввод текста поста"""
@@ -336,7 +372,10 @@ async def handle_text_input(message: Message, state: FSMContext):
     
     if is_command(message.text, "cancel"):
         await state.clear()
-        await message.answer("❌ Создание поста отменено")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer("❌ Создание поста отменено", reply_markup=keyboard)
         return
     
     # Сохраняем текст
@@ -391,7 +430,10 @@ async def handle_media_input(message: Message, state: FSMContext):
     
     if message.text and is_command(message.text, "cancel"):
         await state.clear()
-        await message.answer("❌ Создание поста отменено")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer("❌ Создание поста отменено", reply_markup=keyboard)
         return
     
     # Обработка медиа
@@ -417,6 +459,10 @@ async def handle_media_input(message: Message, state: FSMContext):
         await start_format_step(message, state, lang)
     else:
         if message.text:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⏭️ Пропустить", callback_data="post_nav_skip")],
+                [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
+            ])
             await message.answer(
                 "❌ **Неизвестная команда**\n\n"
                 "Доступные команды:\n"
@@ -424,7 +470,8 @@ async def handle_media_input(message: Message, state: FSMContext):
                 "• `back` - назад\n"
                 "• `cancel` - отмена\n\n"
                 "Или отправьте медиа файл",
-                parse_mode="Markdown"
+                parse_mode="Markdown",
+                reply_markup=keyboard
             )
 
 async def show_content_missing_dialog(message: Message, state: FSMContext, lang: str):
@@ -507,7 +554,10 @@ async def handle_format_text_input(message: Message, state: FSMContext):
     
     if is_command(message.text, "cancel"):
         await state.clear()
-        await message.answer("❌ Создание поста отменено")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer("❌ Создание поста отменено", reply_markup=keyboard)
         return
     
     # Выбор формата
@@ -527,6 +577,11 @@ async def handle_format_text_input(message: Message, state: FSMContext):
         await state.set_data(data)
         await start_buttons_step(message, state, lang)
     else:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📝 HTML", callback_data="format_html")],
+            [InlineKeyboardButton(text="📋 Markdown", callback_data="format_markdown")],
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
+        ])
         await message.answer(
             "❌ **Неизвестный формат**\n\n"
             "Доступные команды:\n"
@@ -535,7 +590,8 @@ async def handle_format_text_input(message: Message, state: FSMContext):
             "• `none` - без форматирования\n"
             "• `skip` - пропустить (HTML по умолчанию)\n"
             "• `back` - назад",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=keyboard
         )
 
 @router.callback_query(F.data.startswith("format_"))
@@ -602,7 +658,10 @@ async def handle_buttons_input(message: Message, state: FSMContext):
     
     if is_command(message.text, "cancel"):
         await state.clear()
-        await message.answer("❌ Создание поста отменено")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer("❌ Создание поста отменено", reply_markup=keyboard)
         return
     
     # Парсим кнопки
@@ -619,6 +678,11 @@ async def handle_buttons_input(message: Message, state: FSMContext):
                     buttons.append({"text": text, "url": url})
         
         if not buttons:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⏭️ Пропустить", callback_data="post_nav_skip")],
+                [InlineKeyboardButton(text="⬅️ Назад", callback_data="post_nav_back")],
+                [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
+            ])
             await message.answer(
                 "❌ **Неверный формат кнопок**\n\n"
                 "Используйте формат: `Текст | URL`\n"
@@ -626,7 +690,8 @@ async def handle_buttons_input(message: Message, state: FSMContext):
                 "Или используйте команды:\n"
                 "• `skip` - пропустить\n"
                 "• `back` - назад",
-                parse_mode="Markdown"
+                parse_mode="Markdown",
+                reply_markup=keyboard
             )
             return
         
@@ -638,11 +703,16 @@ async def handle_buttons_input(message: Message, state: FSMContext):
         await start_time_step(message, state, lang)
         
     except Exception as e:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭️ Пропустить", callback_data="post_nav_skip")],
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
+        ])
         await message.answer(
             "❌ **Ошибка в формате кнопок**\n\n"
             f"Ошибка: {str(e)}\n\n"
             "Используйте формат: `Текст | URL`",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=keyboard
         )
 
 async def start_time_step(message: Message, state: FSMContext, lang: str):
@@ -683,7 +753,10 @@ async def handle_time_text_input(message: Message, state: FSMContext):
     
     if is_command(message.text, "cancel"):
         await state.clear()
-        await message.answer("❌ Создание поста отменено")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer("❌ Создание поста отменено", reply_markup=keyboard)
         return
     
     data = await state.get_data()
@@ -714,13 +787,24 @@ async def handle_time_text_input(message: Message, state: FSMContext):
             
             # Проверяем, что время в будущем
             if utc_dt <= datetime.now(ZoneInfo("UTC")):
-                await message.answer("❌ Время должно быть в будущем!")
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🚀 Сейчас", callback_data="time_now")],
+                    [InlineKeyboardButton(text="📝 Черновик", callback_data="time_draft")],
+                    [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
+                ])
+                await message.answer("❌ Время должно быть в будущем!", reply_markup=keyboard)
                 return
             
             data["publish_time"] = utc_dt
             data["draft"] = False
             
         except ValueError:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🚀 Сейчас", callback_data="time_now")],
+                [InlineKeyboardButton(text="📝 Черновик", callback_data="time_draft")],
+                [InlineKeyboardButton(text="⏰ Запланировать", callback_data="time_schedule")],
+                [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
+            ])
             await message.answer(
                 "❌ **Неверный формат времени**\n\n"
                 "Доступные команды:\n"
@@ -728,7 +812,8 @@ async def handle_time_text_input(message: Message, state: FSMContext):
                 "• `draft` - сохранить черновик\n"
                 "• Дата и время: `2024-12-25 15:30`\n"
                 "• `back` - назад",
-                parse_mode="Markdown"
+                parse_mode="Markdown",
+                reply_markup=keyboard
             )
             return
     
@@ -791,7 +876,14 @@ async def handle_time_schedule(callback: CallbackQuery, state: FSMContext):
         f"• `back` - вернуться назад"
     )
     
-    await callback.message.edit_text(text, parse_mode="Markdown")
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🚀 Сейчас", callback_data="time_now")],
+        [InlineKeyboardButton(text="📝 Черновик", callback_data="time_draft")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="post_nav_back")],
+        [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
+    ])
+    
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=keyboard)
     await callback.answer()
 
 async def start_channel_step(message: Message, state: FSMContext, lang: str):
@@ -837,7 +929,10 @@ async def handle_channel_text_input(message: Message, state: FSMContext):
     
     if is_command(message.text, "cancel"):
         await state.clear()
-        await message.answer("❌ Создание поста отменено")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer("❌ Создание поста отменено", reply_markup=keyboard)
         return
     
     data = await state.get_data()
@@ -863,13 +958,18 @@ async def handle_channel_text_input(message: Message, state: FSMContext):
     
     if not channel:
         available_channels = ", ".join([f"{i+1}" for i in range(len(channels))])
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="post_nav_back")],
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
+        ])
         await message.answer(
             f"❌ **Канал не найден**\n\n"
             f"Доступные варианты:\n"
             f"• Номера каналов: {available_channels}\n"
             f"• @username канала\n"
             f"• `back` - назад",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=keyboard
         )
         return
     
@@ -965,9 +1065,17 @@ async def handle_preview_text_input(message: Message, state: FSMContext):
     
     if is_command(message.text, "cancel"):
         await state.clear()
-        await message.answer("❌ Создание поста отменено")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer("❌ Создание поста отменено", reply_markup=keyboard)
         return
     
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Подтвердить", callback_data="post_confirm")],
+        [InlineKeyboardButton(text="✏️ Редактировать", callback_data="post_edit_menu")],
+        [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
+    ])
     await message.answer(
         "❌ **Неизвестная команда**\n\n"
         "Доступные команды:\n"
@@ -975,7 +1083,8 @@ async def handle_preview_text_input(message: Message, state: FSMContext):
         "• `edit` - редактировать\n"
         "• `back` - назад\n"
         "• `cancel` - отмена",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=keyboard
     )
 
 async def send_post_preview(message: Message, data: dict):
@@ -1142,10 +1251,15 @@ async def handle_post_confirmation_text(message: Message, state: FSMContext, is_
                 "Попробуйте еще раз или обратитесь к администратору."
             )
             
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="menu_create_post_direct")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ])
+            
             if is_callback:
-                await message.edit_text(error_text, parse_mode="Markdown")
+                await message.edit_text(error_text, parse_mode="Markdown", reply_markup=keyboard)
             else:
-                await message.answer(error_text, parse_mode="Markdown")
+                await message.answer(error_text, parse_mode="Markdown", reply_markup=keyboard)
         
         await state.clear()
         
@@ -1158,24 +1272,77 @@ async def handle_post_confirmation_text(message: Message, state: FSMContext, is_
             f"Попробуйте еще раз."
         )
         
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="menu_create_post_direct")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        
         try:
             if is_callback:
-                await message.edit_text(error_text, parse_mode="Markdown")
+                await message.edit_text(error_text, parse_mode="Markdown", reply_markup=keyboard)
             else:
-                await message.answer(error_text, parse_mode="Markdown")
+                await message.answer(error_text, parse_mode="Markdown", reply_markup=keyboard)
         except:
             # Если не удается отправить сообщение об ошибке
             pass
         
         await state.clear()
 
+# Обработчик для прямого редактирования поста
+@router.callback_query(F.data.startswith("post_edit_direct:"))
+async def handle_post_edit_direct(callback: CallbackQuery, state: FSMContext):
+    """Прямое редактирование поста без запуска команды"""
+    post_id = int(callback.data.split(":", 1)[1])
+    user_id = callback.from_user.id
+    
+    # Получаем пост
+    post = supabase_db.db.get_post(post_id)
+    if not post or not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
+        await callback.answer("❌ Пост не найден или нет доступа!")
+        return
+    
+    if post.get("published"):
+        await callback.answer("❌ Нельзя редактировать опубликованный пост!")
+        return
+    
+    # Инициализируем данные для редактирования
+    user = supabase_db.db.get_user(user_id)
+    
+    await state.set_data({
+        "post_id": post_id,
+        "original_post": post,
+        "user_settings": user,
+        "current_step": "text",
+        "changes": {}
+    })
+    
+    # Импортируем функцию из edit_post
+    try:
+        from edit_post import start_edit_text_step
+        await start_edit_text_step(callback.message, state, user.get("language", "ru"))
+        await callback.answer()
+    except ImportError:
+        # Fallback если модуль недоступен
+        await callback.message.edit_text(
+            f"✏️ **Редактирование поста #{post_id}**\n\n"
+            f"Используйте команду `/edit {post_id}` для редактирования поста.",
+            parse_mode="Markdown"
+        )
+        await callback.answer("Используйте команду /edit " + str(post_id))
+
 @router.callback_query(F.data == "edit_offer_decline")
 async def handle_edit_offer_decline(callback: CallbackQuery):
     """Отклонение предложения редактирования"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
+    
     await callback.message.edit_text(
         "✅ **Отлично!**\n\n"
         "Пост готов к публикации в запланированное время.",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=keyboard
     )
     await callback.answer()
 
@@ -1259,10 +1426,15 @@ async def handle_edit_field_logic(message: Message, state: FSMContext, field: st
             f"• `cancel` - отменить редактирование"
         )
         
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭️ Пропустить", callback_data="post_nav_skip")],
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
+        ])
+        
         if is_callback:
-            await message.edit_text(text, parse_mode="Markdown")
+            await message.edit_text(text, parse_mode="Markdown", reply_markup=keyboard)
         else:
-            await message.answer(text, parse_mode="Markdown")
+            await message.answer(text, parse_mode="Markdown", reply_markup=keyboard)
     
     elif field == "media":
         await state.set_state(PostCreationFlow.step_media)
@@ -1275,10 +1447,15 @@ async def handle_edit_field_logic(message: Message, state: FSMContext, field: st
             f"• `cancel` - отменить редактирование"
         )
         
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭️ Пропустить", callback_data="post_nav_skip")],
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
+        ])
+        
         if is_callback:
-            await message.edit_text(text, parse_mode="Markdown")
+            await message.edit_text(text, parse_mode="Markdown", reply_markup=keyboard)
         else:
-            await message.answer(text, parse_mode="Markdown")
+            await message.answer(text, parse_mode="Markdown", reply_markup=keyboard)
     
     elif field == "format":
         text = (
@@ -1311,10 +1488,15 @@ async def handle_edit_field_logic(message: Message, state: FSMContext, field: st
             f"• `cancel` - отменить редактирование"
         )
         
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭️ Пропустить", callback_data="post_nav_skip")],
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
+        ])
+        
         if is_callback:
-            await message.edit_text(text, parse_mode="Markdown")
+            await message.edit_text(text, parse_mode="Markdown", reply_markup=keyboard)
         else:
-            await message.answer(text, parse_mode="Markdown")
+            await message.answer(text, parse_mode="Markdown", reply_markup=keyboard)
     
     elif field == "time":
         text = (
@@ -1393,7 +1575,10 @@ async def go_back_step(message: Message, state: FSMContext, lang: str):
     history = data.get("step_history", [])
     
     if not history:
-        await message.answer("❌ Это первый шаг!")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
+        ])
+        await message.answer("❌ Это первый шаг!", reply_markup=keyboard)
         return
     
     # Удаляем последний шаг из истории
@@ -1474,9 +1659,15 @@ async def handle_nav_skip(callback: CallbackQuery, state: FSMContext):
 async def handle_nav_cancel(callback: CallbackQuery, state: FSMContext):
     """Отменить создание поста"""
     await state.clear()
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
+    
     await callback.message.edit_text(
         "❌ **Создание поста отменено**\n\n"
         "Все данные удалены.",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=keyboard
     )
     await callback.answer()
