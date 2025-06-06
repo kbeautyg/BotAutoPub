@@ -128,27 +128,72 @@ async def callback_main_menu(callback: CallbackQuery):
         await callback.answer("❌ Произошла ошибка")
 
 @router.callback_query(F.data == "menu_create_post")
-async def callback_create_post(callback: CallbackQuery):
-    """Создать пост"""
-    try:
+async def callback_create_post(callback: CallbackQuery, state: FSMContext):
+    """Создать пост напрямую"""
+    user_id = callback.from_user.id
+    user = supabase_db.db.ensure_user(user_id)
+    lang = user.get("language", "ru") if user else "ru"
+    
+    # Проверяем наличие проекта
+    project_id = user.get("current_project")
+    if not project_id:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]
+            [InlineKeyboardButton(text="📁 Создать проект", callback_data="proj_new")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
         ])
-        
         await callback.message.edit_text(
-            "📝 **Создание нового поста**\n\n"
-            "Используйте команду `/create` для создания поста с пошаговым мастером.\n\n"
-            "**Быстрое создание:**\n"
-            "• `/quickpost @канал now Текст поста` - опубликовать сейчас\n"
-            "• `/quickpost 1 draft Черновик` - сохранить черновик\n"
-            "• `/quickpost 2 2024-12-25_15:30 Запланированный пост`",
-            reply_markup=keyboard,
+            "❌ Нет активного проекта. Создайте проект для начала работы.",
+            reply_markup=keyboard
+        )
+        await callback.answer()
+        return
+    
+    # Проверяем наличие каналов
+    channels = supabase_db.db.list_channels(project_id=project_id)
+    if not channels:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📺 Добавить канал", callback_data="channels_add")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await callback.message.edit_text(
+            "❌ **Нет доступных каналов**\n\n"
+            "Сначала добавьте канал для публикации постов.",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+        await callback.answer()
+        return
+    
+    # Инициализируем данные поста и запускаем процесс создания
+    await state.set_data({
+        "user_id": user_id,
+        "project_id": project_id,
+        "text": None,
+        "media_type": None,
+        "media_file_id": None,
+        "parse_mode": "HTML",
+        "buttons": None,
+        "publish_time": None,
+        "repeat_interval": None,
+        "channel_id": None,
+        "draft": False,
+        "step_history": [],
+        "current_step": "step_text"
+    })
+    
+    # Импортируем и запускаем первый шаг создания поста
+    try:
+        from scheduled_posts import start_text_step
+        from states import PostCreationFlow
+        await state.set_state(PostCreationFlow.step_text)
+        await start_text_step(callback.message, state, lang)
+        await callback.answer()
+    except ImportError:
+        await callback.message.edit_text(
+            "❌ Ошибка модуля создания постов. Используйте команду `/create`",
             parse_mode="Markdown"
         )
         await callback.answer()
-    except Exception as e:
-        print(f"Error in callback_create_post: {e}")
-        await callback.answer("❌ Произошла ошибка")
 
 @router.callback_query(F.data == "menu_posts")
 async def callback_posts_menu(callback: CallbackQuery):
@@ -165,9 +210,17 @@ async def callback_posts_menu(callback: CallbackQuery):
 async def callback_channels_menu(callback: CallbackQuery):
     """Меню каналов"""
     try:
-        # Импортируем функцию из channels
-        from channels import callback_channels_menu as channels_menu_handler
-        await channels_menu_handler(callback)
+        # Прямой запуск меню каналов
+        user_id = callback.from_user.id
+        user = supabase_db.db.get_user(user_id)
+        lang = user.get("language", "ru") if user else "ru"
+        
+        # Показываем главное меню каналов
+        from channels import get_channels_main_menu
+        text = "🔧 **Управление каналами**\n\nВыберите действие:"
+        keyboard = get_channels_main_menu(lang)
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+        await callback.answer()
     except Exception as e:
         print(f"Error in callback_channels_menu: {e}")
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -188,8 +241,66 @@ async def callback_channels_menu(callback: CallbackQuery):
 
 @router.callback_query(F.data == "menu_projects")
 async def callback_projects_menu(callback: CallbackQuery):
-    """Меню проектов"""
+    """Меню проектов - прямой запуск"""
+    user_id = callback.from_user.id
+    user = supabase_db.db.get_user(user_id)
+    if not user:
+        user = supabase_db.db.ensure_user(user_id)
+    
+    lang = user.get("language", "ru") if user else "ru"
+    
     try:
+        # Получаем проекты пользователя
+        projects = supabase_db.db.list_projects(user_id)
+        
+        if not projects:
+            # Если нет проектов, предлагаем создать
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📁 Создать проект", callback_data="proj_new")],
+                [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]
+            ])
+            await callback.message.edit_text(
+                "📁 **Управление проектами**\n\n"
+                "У вас пока нет проектов. Создайте первый проект для начала работы!",
+                reply_markup=keyboard,
+                parse_mode="Markdown"
+            )
+            await callback.answer()
+            return
+        
+        # Формируем список проектов
+        text = "📁 **Ваши проекты:**\n\n"
+        current_proj = user.get("current_project")
+        
+        buttons = []
+        for proj in projects:
+            name = proj.get("name", "Unnamed")
+            is_current = current_proj and proj["id"] == current_proj
+            
+            # Добавляем проект в текст
+            if is_current:
+                text += f"• **{name}** ✅ (текущий)\n"
+            else:
+                text += f"• {name}\n"
+            
+            # Добавляем кнопку для переключения
+            button_text = f"{name}" + (" ✅" if is_current else "")
+            buttons.append([InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"proj_switch:{proj['id']}"
+            )])
+        
+        # Добавляем кнопки управления
+        buttons.append([InlineKeyboardButton(text="➕ Новый проект", callback_data="proj_new")])
+        buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")])
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+        
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+        await callback.answer()
+        
+    except Exception as e:
+        print(f"Error in callback_projects_menu: {e}")
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]
         ])
@@ -206,17 +317,24 @@ async def callback_projects_menu(callback: CallbackQuery):
             parse_mode="Markdown"
         )
         await callback.answer()
-    except Exception as e:
-        print(f"Error in callback_projects_menu: {e}")
-        await callback.answer("❌ Произошла ошибка")
 
 @router.callback_query(F.data == "menu_settings")
 async def callback_settings_menu(callback: CallbackQuery):
     """Меню настроек"""
     try:
         # Импортируем функцию из settings_improved
-        from settings_improved import callback_settings_menu as settings_menu_handler
-        await settings_menu_handler(callback)
+        user_id = callback.from_user.id
+        user = supabase_db.db.get_user(user_id)
+        if not user:
+            user = supabase_db.db.ensure_user(user_id)
+        lang = user.get("language", "ru") if user else "ru"
+        
+        # Прямой вызов настроек
+        from settings_improved import format_user_settings, get_settings_main_menu
+        text = format_user_settings(user)
+        keyboard = get_settings_main_menu(lang)
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+        await callback.answer()
     except Exception as e:
         print(f"Error in callback_settings_menu: {e}")
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -244,18 +362,40 @@ async def callback_help_menu(callback: CallbackQuery):
             [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]
         ])
         
+        help_text = """
+📖 **Справка по боту**
+
+**Основные команды:**
+• `/start` - начать работу с ботом
+• `/menu` - главное меню
+• `/help` - эта справка
+
+**Управление постами:**
+• `/create` - создать новый пост (пошагово)
+• `/quickpost <канал> <время> <текст>` - быстрое создание
+• `/list` - список всех постов
+• `/view <ID>` - просмотр поста
+• `/edit <ID>` - редактировать пост
+• `/delete <ID>` - удалить пост
+• `/publish <ID>` - опубликовать немедленно
+
+**Управление каналами:**
+• `/channels` - меню управления каналами
+• `/channels add <@канал или ID>` - добавить канал
+• `/channels list` - список каналов
+
+**Проекты:**
+• `/project` - управление проектами
+• `/project new <название>` - создать проект
+
+**Настройки:**
+• `/settings` - настройки профиля
+
+💡 **Совет:** Используйте кнопки меню для быстрого доступа к функциям!
+"""
+        
         await callback.message.edit_text(
-            "❓ **Справка по боту**\n\n"
-            "Используйте команду `/help` для получения полной справки.\n\n"
-            "**Основные команды:**\n"
-            "• `/create` - создать пост\n"
-            "• `/list` - список постов\n"
-            "• `/channels` - управление каналами\n"
-            "• `/settings` - настройки\n\n"
-            "**Быстрые команды:**\n"
-            "• `/quickpost` - быстрое создание\n"
-            "• `/edit <ID>` - редактировать пост\n"
-            "• `/view <ID>` - просмотр поста",
+            help_text,
             reply_markup=keyboard,
             parse_mode="Markdown"
         )
