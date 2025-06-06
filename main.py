@@ -38,7 +38,7 @@ import settings_improved
 import view_post
 
 # Улучшенные модули
-import edit_post_improved  # Используем новый улучшенный редактор
+import edit_post  # Используем новый улучшенный редактор
 
 # Модули для совместимости (для работы с существующими постами)
 import delete_post
