@@ -57,10 +57,7 @@ def get_posts_list_keyboard(has_scheduled: bool = False, has_drafts: bool = Fals
 async def cmd_list_posts(message: Message):
     """Показать список всех постов"""
     user_id = message.from_user.id
-    user = supabase_db.db.get_user(user_id)
-    
-    if not user:
-        user = supabase_db.db.ensure_user(user_id)
+    user = supabase_db.db.ensure_user(user_id)  # Обеспечиваем создание пользователя
     
     project_id = user.get("current_project") if user else None
     
@@ -77,7 +74,7 @@ async def cmd_list_posts(message: Message):
         )
         return
     
-    # Получаем все посты
+    # Получаем все посты проекта
     try:
         all_posts = supabase_db.db.list_posts(project_id=project_id, only_pending=False)
     except Exception as e:
@@ -119,6 +116,9 @@ async def cmd_list_posts(message: Message):
         elif post.get("draft"):
             draft_posts.append(post)
         elif post.get("publish_time"):
+            scheduled_posts.append(post)
+        else:
+            # Посты без времени публикации и не черновики - считаем как запланированные
             scheduled_posts.append(post)
     
     # Сортируем
@@ -183,10 +183,7 @@ async def cmd_list_posts(message: Message):
 async def callback_posts_menu(callback: CallbackQuery):
     """Показать меню постов через callback"""
     user_id = callback.from_user.id
-    user = supabase_db.db.get_user(user_id)
-    
-    if not user:
-        user = supabase_db.db.ensure_user(user_id)
+    user = supabase_db.db.ensure_user(user_id)  # Обеспечиваем создание пользователя
     
     project_id = user.get("current_project") if user else None
     
@@ -249,6 +246,9 @@ async def callback_posts_menu(callback: CallbackQuery):
             draft_posts.append(post)
         elif post.get("publish_time"):
             scheduled_posts.append(post)
+        else:
+            # Посты без времени публикации и не черновики
+            scheduled_posts.append(post)
     
     # Формируем текст
     text = f"📋 **Управление постами**\n\n"
@@ -276,10 +276,7 @@ async def callback_posts_menu(callback: CallbackQuery):
 async def callback_posts_scheduled(callback: CallbackQuery):
     """Показать запланированные посты"""
     user_id = callback.from_user.id
-    user = supabase_db.db.get_user(user_id)
-    
-    if not user:
-        user = supabase_db.db.ensure_user(user_id)
+    user = supabase_db.db.ensure_user(user_id)
     
     project_id = user.get("current_project") if user else None
     
@@ -293,7 +290,9 @@ async def callback_posts_scheduled(callback: CallbackQuery):
     
     # Получаем запланированные посты
     try:
-        posts = supabase_db.db.get_scheduled_posts_by_channel(project_id)
+        all_posts = supabase_db.db.list_posts(project_id=project_id, only_pending=False)
+        posts = [p for p in all_posts if not p.get("published") and not p.get("draft") and (p.get("publish_time") or not p.get("draft"))]
+        posts.sort(key=lambda x: x.get("publish_time") or "")
     except Exception as e:
         print(f"Ошибка получения запланированных постов: {e}")
         posts = []
@@ -309,9 +308,9 @@ async def callback_posts_scheduled(callback: CallbackQuery):
         
         current_channel = None
         for post in posts:
-            # Группируем по каналам
-            channel_info = post.get("channels", {})
-            channel_name = channel_info.get("name", "Неизвестный канал")
+            # Получаем информацию о канале
+            channel = supabase_db.db.get_channel(post.get("channel_id"))
+            channel_name = channel.get("name", "Неизвестный канал") if channel else "Неизвестный канал"
             
             if channel_name != current_channel:
                 if current_channel is not None:
@@ -330,8 +329,8 @@ async def callback_posts_scheduled(callback: CallbackQuery):
         if posts:
             # Показываем первые 5 постов как кнопки
             for post in posts[:5]:
-                channel_info = post.get("channels", {})
-                channel_name = channel_info.get("name", "?")[:10]
+                channel = supabase_db.db.get_channel(post.get("channel_id"))
+                channel_name = channel.get("name", "?")[:10] if channel else "?"
                 buttons.append([InlineKeyboardButton(
                     text=f"#{post['id']} • {channel_name}",
                     callback_data=f"post_view:{post['id']}"
@@ -349,10 +348,7 @@ async def callback_posts_scheduled(callback: CallbackQuery):
 async def callback_posts_drafts(callback: CallbackQuery):
     """Показать черновики"""
     user_id = callback.from_user.id
-    user = supabase_db.db.get_user(user_id)
-    
-    if not user:
-        user = supabase_db.db.ensure_user(user_id)
+    user = supabase_db.db.ensure_user(user_id)
     
     project_id = user.get("current_project") if user else None
     
@@ -366,7 +362,9 @@ async def callback_posts_drafts(callback: CallbackQuery):
     
     # Получаем черновики
     try:
-        posts = supabase_db.db.get_draft_posts_by_channel(project_id)
+        all_posts = supabase_db.db.list_posts(project_id=project_id, only_pending=False)
+        posts = [p for p in all_posts if p.get("draft")]
+        posts.sort(key=lambda x: x.get("created_at") or "", reverse=True)
     except Exception as e:
         print(f"Ошибка получения черновиков: {e}")
         posts = []
@@ -381,8 +379,8 @@ async def callback_posts_drafts(callback: CallbackQuery):
         text = "📝 **Черновики**\n\n"
         
         for i, post in enumerate(posts, 1):
-            channel_info = post.get("channels", {})
-            channel_name = channel_info.get("name", "Канал не выбран")
+            channel = supabase_db.db.get_channel(post.get("channel_id"))
+            channel_name = channel.get("name", "Канал не выбран") if channel else "Канал не выбран"
             post_text = post.get("text", "Без текста")[:50]
             
             created_at = post.get("created_at", "")
@@ -421,10 +419,7 @@ async def callback_posts_drafts(callback: CallbackQuery):
 async def callback_posts_published(callback: CallbackQuery):
     """Показать опубликованные посты"""
     user_id = callback.from_user.id
-    user = supabase_db.db.get_user(user_id)
-    
-    if not user:
-        user = supabase_db.db.ensure_user(user_id)
+    user = supabase_db.db.ensure_user(user_id)
     
     project_id = user.get("current_project") if user else None
     
@@ -492,10 +487,7 @@ async def callback_view_post(callback: CallbackQuery):
     """Просмотр поста через callback"""
     post_id = int(callback.data.split(":")[-1])
     user_id = callback.from_user.id
-    user = supabase_db.db.get_user(user_id)
-    
-    if not user:
-        user = supabase_db.db.ensure_user(user_id)
+    user = supabase_db.db.ensure_user(user_id)
     
     post = supabase_db.db.get_post(post_id)
     if not post:
@@ -566,6 +558,7 @@ async def callback_view_post(callback: CallbackQuery):
         info_text += f"\n📝 **Текст:**\n{text_preview}"
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_direct:{post_id}")],
             [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
         ])
