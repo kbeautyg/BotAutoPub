@@ -1,4 +1,137 @@
-from aiogram import Router, types, F
+if not project_id:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📁 Создать проект", callback_data="proj_new")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ])
+            await message.answer(
+                "❌ **Нет активного проекта**\n\n"
+                "Создайте проект через /project для начала работы с постами.",
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+            return
+        
+        # Получаем все посты проекта
+        try:
+            all_posts = supabase_db.db.list_posts(project_id=project_id, only_pending=False)
+            if all_posts is None:
+                all_posts = []
+        except Exception as e:
+            print(f"Ошибка получения постов: {e}")
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="posts_menu")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ])
+            await message.answer(
+                "❌ **Ошибка загрузки постов**\n\n"
+                "Не удалось загрузить список постов. Попробуйте позже.",
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+            return
+        
+        if not all_posts:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📝 Создать первый пост", callback_data="menu_create_post_direct")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ])
+            
+            await message.answer(
+                "📋 **Список постов**\n\n"
+                "🆕 У вас пока нет постов. Создайте первый!",
+                reply_markup=keyboard,
+                parse_mode="Markdown"
+            )
+            return
+        
+        # Разделяем посты по категориям
+        scheduled_posts = []
+        draft_posts = []
+        published_posts = []
+        
+        for post in all_posts:
+            if post.get("published"):
+                published_posts.append(post)
+            elif post.get("draft"):
+                draft_posts.append(post)
+            elif post.get("publish_time"):
+                scheduled_posts.append(post)
+            else:
+                # Посты без времени публикации и не черновики - считаем как запланированные
+                scheduled_posts.append(post)
+        
+        # Сортируем
+        scheduled_posts.sort(key=lambda x: x.get("publish_time") or "")
+        draft_posts.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+        published_posts.sort(key=lambda x: x.get("publish_time") or "", reverse=True)
+        
+        # Формируем текст
+        text = f"📋 **Все посты проекта**\n\n"
+        text += f"📊 Всего постов: {len(all_posts)}\n\n"
+        
+        if scheduled_posts:
+            text += f"⏰ **Запланированные ({len(scheduled_posts)}):**\n"
+            for i, post in enumerate(scheduled_posts[:5], 1):
+                try:
+                    channel = supabase_db.db.get_channel(post.get("channel_id"))
+                    channel_name = channel.get("name", "?") if channel else "?"
+                    time_str = format_post_time(post, user)
+                    post_text = post.get("text", "Без текста")[:30]
+                    text += f"{i}. #{post['id']} • {channel_name} • {time_str}\n   📝 {post_text}...\n"
+                except Exception as e:
+                    print(f"Error formatting post {post.get('id')}: {e}")
+                    text += f"{i}. #{post.get('id', '?')} • Ошибка загрузки\n"
+            if len(scheduled_posts) > 5:
+                text += f"   _...и еще {len(scheduled_posts) - 5} постов_\n"
+            text += "\n"
+        
+        if draft_posts:
+            text += f"📝 **Черновики ({len(draft_posts)}):**\n"
+            for i, post in enumerate(draft_posts[:3], 1):
+                try:
+                    channel = supabase_db.db.get_channel(post.get("channel_id"))
+                    channel_name = channel.get("name", "?") if channel else "?"
+                    post_text = post.get("text", "Без текста")[:30]
+                    text += f"{i}. #{post['id']} • {channel_name}\n   📝 {post_text}...\n"
+                except Exception as e:
+                    print(f"Error formatting draft post {post.get('id')}: {e}")
+                    text += f"{i}. #{post.get('id', '?')} • Ошибка загрузки\n"
+            if len(draft_posts) > 3:
+                text += f"   _...и еще {len(draft_posts) - 3} черновиков_\n"
+            text += "\n"
+        
+        if published_posts:
+            text += f"✅ **Опубликованные ({len(published_posts)}):**\n"
+            text += f"   _Показаны последние {min(3, len(published_posts))} из {len(published_posts)}_\n"
+            for i, post in enumerate(published_posts[:3], 1):
+                try:
+                    channel = supabase_db.db.get_channel(post.get("channel_id"))
+                    channel_name = channel.get("name", "?") if channel else "?"
+                    post_text = post.get("text", "Без текста")[:30]
+                    text += f"{i}. #{post['id']} • {channel_name}\n   📝 {post_text}...\n"
+                except Exception as e:
+                    print(f"Error formatting published post {post.get('id')}: {e}")
+                    text += f"{i}. #{post.get('id', '?')} • Ошибка загрузки\n"
+        
+        # Добавляем полезные команды
+        text += (
+            f"\n💡 **Полезные команды:**\n"
+            f"• `/view <ID>` - просмотр поста\n"
+            f"• `/edit <ID>` - редактировать пост\n"
+            f"• `/delete <ID>` - удалить пост"
+        )
+        
+        keyboard = get_posts_list_keyboard(
+            has_scheduled=bool(scheduled_posts),
+            has_drafts=bool(draft_posts),
+            has_published=bool(published_posts)
+        )
+        
+        await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
+        
+    except Exception as e:
+        print(f"Error in cmd_list_posts: {e}")
+        await message.answer("❌ Произошла ошибка при загрузке списка постов. Попробуйте позже.")from aiogram import Router, types, F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.filters import Command
 import supabase_db
@@ -56,15 +189,21 @@ def get_posts_list_keyboard(has_scheduled: bool = False, has_drafts: bool = Fals
 @router.message(Command("list"))
 async def cmd_list_posts(message: Message):
     """Показать список всех постов"""
-    user_id = message.from_user.id
-    
-    # Используем get_user вместо ensure_user для получения существующего пользователя
-    user = supabase_db.db.get_user(user_id)
-    if not user:
-        # Если пользователя нет, создаем его
-        user = supabase_db.db.ensure_user(user_id)
-    
-    project_id = user.get("current_project") if user else None
+    try:
+        user_id = message.from_user.id
+        
+        # Используем get_user вместо ensure_user для получения существующего пользователя
+        user = supabase_db.db.get_user(user_id)
+        if not user:
+            # Если пользователя нет, создаем его
+            user = supabase_db.db.ensure_user(user_id)
+        
+        # Проверяем что user не None после создания
+        if not user:
+            await message.answer("❌ Ошибка инициализации пользователя. Попробуйте позже.")
+            return
+        
+        project_id = user.get("current_project")
     
     if not project_id:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
