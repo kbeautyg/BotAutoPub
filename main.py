@@ -53,7 +53,6 @@ dp.include_router(view_post.router)
 dp.include_router(list_posts.router)  # Добавляем router для списка постов
 dp.include_router(settings_improved.router)
 dp.include_router(edit_post.router)  # Новый улучшенный редактор
-dp.include_router(delete_post.router)
 dp.include_router(main_menu.router)  # В конце, чтобы не перехватывал команды
 
 # Глобальные обработчики callback'ов для управления постами
