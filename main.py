@@ -3,6 +3,7 @@ import os
 from aiogram import Bot, Dispatcher, F
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.fsm.context import FSMContext
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -55,6 +56,111 @@ dp.include_router(settings_improved.router)
 dp.include_router(edit_post.router)  # Новый улучшенный редактор
 dp.include_router(main_menu.router)  # В конце, чтобы не перехватывал команды
 
+# Улучшенные глобальные обработчики для редактирования
+@dp.callback_query(F.data.startswith("edit_field:"))
+async def callback_edit_field_global(callback: CallbackQuery, state: FSMContext):
+    """Глобальный обработчик редактирования полей поста"""
+    parts = callback.data.split(":")
+    
+    if len(parts) == 3 and parts[2] == "menu":
+        # Это возврат в главное меню редактирования
+        post_id = int(parts[1])
+        user_id = callback.from_user.id
+        user = supabase_db.db.get_user(user_id)
+        
+        # Получаем пост
+        post = supabase_db.db.get_post(post_id)
+        if not post or not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
+            await callback.answer("❌ Пост не найден или нет доступа!")
+            return
+        
+        if post.get("published"):
+            await callback.answer("❌ Нельзя редактировать опубликованный пост!")
+            return
+        
+        lang = user.get("language", "ru") if user else "ru"
+        
+        try:
+            from edit_post import show_edit_main_menu
+            await show_edit_main_menu(callback.message, post_id, post, user, lang)
+        except ImportError:
+            await callback.message.edit_text(f"Используйте команду `/edit {post_id}` для редактирования.")
+        
+        await callback.answer()
+    else:
+        # Обычное редактирование поля - передаем в edit_post модуль
+        try:
+            from edit_post import handle_edit_field_callback
+            await handle_edit_field_callback(callback, state)
+        except ImportError:
+            post_id = int(parts[1]) if len(parts) > 1 else 0
+            await callback.message.edit_text(f"Используйте команду `/edit {post_id}` для редактирования.")
+            await callback.answer()
+
+@dp.callback_query(F.data.startswith("edit_recreate:"))
+async def callback_edit_recreate_global(callback: CallbackQuery, state: FSMContext):
+    """Глобальный обработчик полного пересоздания поста"""
+    try:
+        from edit_post import handle_edit_recreate
+        await handle_edit_recreate(callback, state)
+    except ImportError:
+        parts = callback.data.split(":")
+        post_id = int(parts[1]) if len(parts) > 1 else 0
+        await callback.message.edit_text(f"Используйте команду `/edit {post_id}` для полного редактирования.")
+        await callback.answer()
+
+@dp.callback_query(F.data.startswith("edit_menu:"))
+async def callback_edit_menu_global(callback: CallbackQuery, state: FSMContext):
+    """Глобальный обработчик возврата в меню редактирования"""
+    try:
+        from edit_post import handle_edit_menu_return
+        await handle_edit_menu_return(callback, state)
+    except ImportError:
+        parts = callback.data.split(":")
+        post_id = int(parts[1]) if len(parts) > 1 else 0
+        await callback.message.edit_text(f"Используйте команду `/edit {post_id}` для редактирования.")
+        await callback.answer()
+
+@dp.callback_query(F.data.startswith("edit_confirm:"))
+async def callback_edit_confirm_global(callback: CallbackQuery, state: FSMContext):
+    """Глобальный обработчик подтверждения редактирования"""
+    try:
+        from edit_post import handle_edit_confirm_callback
+        await handle_edit_confirm_callback(callback, state)
+    except ImportError:
+        await callback.message.edit_text("Ошибка: модуль редактирования недоступен.")
+        await callback.answer()
+
+@dp.callback_query(F.data.startswith("edit_skip:"))
+async def callback_edit_skip_global(callback: CallbackQuery, state: FSMContext):
+    """Глобальный обработчик пропуска шага редактирования"""
+    try:
+        from edit_post import handle_edit_skip
+        await handle_edit_skip(callback, state)
+    except ImportError:
+        await callback.message.edit_text("Ошибка: модуль редактирования недоступен.")
+        await callback.answer()
+
+@dp.callback_query(F.data.startswith("edit_save:"))
+async def callback_edit_save_global(callback: CallbackQuery, state: FSMContext):
+    """Глобальный обработчик сохранения редактирования"""
+    try:
+        from edit_post import handle_edit_save
+        await handle_edit_save(callback, state)
+    except ImportError:
+        await callback.message.edit_text("Ошибка: модуль редактирования недоступен.")
+        await callback.answer()
+
+@dp.callback_query(F.data.startswith("edit_cancel:"))
+async def callback_edit_cancel_global(callback: CallbackQuery, state: FSMContext):
+    """Глобальный обработчик отмены редактирования"""
+    try:
+        from edit_post import handle_edit_cancel
+        await handle_edit_cancel(callback, state)
+    except ImportError:
+        await callback.message.edit_text("Ошибка: модуль редактирования недоступен.")
+        await callback.answer()
+
 # Глобальные обработчики callback'ов для управления постами
 @dp.callback_query(F.data.startswith("post_edit_cmd:"))
 async def callback_edit_post_global(callback: CallbackQuery):
@@ -76,6 +182,47 @@ async def callback_edit_post_global(callback: CallbackQuery):
     )
     
     await callback.answer()
+
+# Также нужно обновить обработчик post_edit_direct для использования нового интерфейса
+@dp.callback_query(F.data.startswith("post_edit_direct:"))
+async def callback_edit_post_global_updated(callback: CallbackQuery, state: FSMContext):
+    """Глобальный обработчик команды редактирования поста (обновленный)"""
+    post_id = int(callback.data.split(":", 1)[1])
+    user_id = callback.from_user.id
+    user = supabase_db.db.get_user(user_id)
+    
+    # Получаем пост
+    post = supabase_db.db.get_post(post_id)
+    if not post or not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
+        await callback.answer("❌ Пост не найден или нет доступа!")
+        return
+    
+    if post.get("published"):
+        await callback.answer("❌ Нельзя редактировать опубликованный пост!")
+        return
+    
+    lang = user.get("language", "ru") if user else "ru"
+    
+    # Пытаемся использовать новое главное меню редактирования
+    try:
+        from edit_post import show_edit_main_menu
+        await show_edit_main_menu(callback.message, post_id, post, user, lang)
+        await callback.answer()
+    except ImportError:
+        # Fallback на старый интерфейс
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✏️ Редактировать пост", callback_data=f"post_edit_direct:{post_id}")],
+            [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_full_view:{post_id}")],
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")]
+        ])
+        
+        await callback.message.edit_text(
+            f"✏️ **Редактирование поста #{post_id}**\n\n"
+            f"Используйте команду `/edit {post_id}` для редактирования.",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+        await callback.answer("Используйте команду /edit " + str(post_id))
 
 @dp.callback_query(F.data.startswith("post_publish_cmd:"))
 async def callback_publish_post_global(callback: CallbackQuery):
@@ -223,54 +370,64 @@ async def callback_full_view_post_global(callback: CallbackQuery):
         return
     
     # Импортируем функции для просмотра
-    from view_post import send_post_preview, format_time_for_user
-    
-    # Отправляем полный превью поста
-    await send_post_preview(callback.message, post)
-    
-    # Отправляем информацию с кнопками
-    channel = supabase_db.db.get_channel(post['channel_id'])
-    channel_name = channel['name'] if channel else 'Неизвестный канал'
-    
-    info_text = f"👀 **Полный просмотр поста #{post_id}**\n\n"
-    info_text += f"📺 **Канал:** {channel_name}\n"
-    
-    if post.get('published'):
-        info_text += "✅ **Статус:** Опубликован\n"
-    elif post.get('draft'):
-        info_text += "📝 **Статус:** Черновик\n"
-    elif post.get('publish_time'):
-        formatted_time = format_time_for_user(post['publish_time'], user)
-        user_tz = user.get('timezone', 'UTC')
-        info_text += f"⏰ **Запланировано:** {formatted_time}\n"
-    
-    # Создаем клавиатуру действий
-    buttons = []
-    
-    if not post.get('published'):
+    try:
+        from view_post import send_post_preview, format_time_for_user
+        
+        # Отправляем полный превью поста
+        await send_post_preview(callback.message, post)
+        
+        # Отправляем информацию с кнопками
+        channel = supabase_db.db.get_channel(post['channel_id'])
+        channel_name = channel['name'] if channel else 'Неизвестный канал'
+        
+        info_text = f"👀 **Полный просмотр поста #{post_id}**\n\n"
+        info_text += f"📺 **Канал:** {channel_name}\n"
+        
+        if post.get('published'):
+            info_text += "✅ **Статус:** Опубликован\n"
+        elif post.get('draft'):
+            info_text += "📝 **Статус:** Черновик\n"
+        elif post.get('publish_time'):
+            formatted_time = format_time_for_user(post['publish_time'], user)
+            user_tz = user.get('timezone', 'UTC')
+            info_text += f"⏰ **Запланировано:** {formatted_time}\n"
+        
+        # Создаем клавиатуру действий
+        buttons = []
+        
+        if not post.get('published'):
+            buttons.append([
+                InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_direct:{post_id}"),
+                InlineKeyboardButton(text="🚀 Опубликовать", callback_data=f"post_publish_cmd:{post_id}")
+            ])
+            buttons.append([
+                InlineKeyboardButton(text="📅 Перенести", callback_data=f"post_reschedule_cmd:{post_id}"),
+                InlineKeyboardButton(text="🗑 Удалить", callback_data=f"post_delete_cmd:{post_id}")
+            ])
+        
         buttons.append([
-            InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_direct:{post_id}"),
-            InlineKeyboardButton(text="🚀 Опубликовать", callback_data=f"post_publish_cmd:{post_id}")
+            InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu"),
+            InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
         ])
-        buttons.append([
-            InlineKeyboardButton(text="📅 Перенести", callback_data=f"post_reschedule_cmd:{post_id}"),
-            InlineKeyboardButton(text="🗑 Удалить", callback_data=f"post_delete_cmd:{post_id}")
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+        
+        await callback.message.answer(info_text, parse_mode="Markdown", reply_markup=keyboard)
+        await callback.answer()
+    except ImportError:
+        # Fallback если модуль view_post недоступен
+        info_text = f"👀 **Пост #{post_id}**\n\nИспользуйте команду `/view {post_id}` для полного просмотра."
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
         ])
-    
-    buttons.append([
-        InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu"),
-        InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
-    ])
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-    
-    await callback.message.answer(info_text, parse_mode="Markdown", reply_markup=keyboard)
-    await callback.answer()
+        await callback.message.answer(info_text, parse_mode="Markdown", reply_markup=keyboard)
+        await callback.answer()
 
-# Обработчик для callback кнопки "Создать пост" из меню
+# Обработчик для callback кнопки "Создать пост" из меню (обновленный)
 @dp.callback_query(F.data == "menu_create_post_direct")
-async def callback_create_post_direct(callback: CallbackQuery):
-    """Прямое создание поста через callback из меню"""
+async def callback_create_post_direct_updated(callback: CallbackQuery):
+    """Прямое создание поста через callback из меню (обновленный)"""
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📝 Пошаговое создание", callback_data="create_step_by_step")],
         [InlineKeyboardButton(text="🚀 Быстрое создание", callback_data="create_quick_help")],
