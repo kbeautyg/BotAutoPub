@@ -611,8 +611,116 @@ async def edit_channel_field(callback: CallbackQuery, state: FSMContext, post: d
     
     if not channels:
         await callback.message.edit_text("❌ Нет доступных каналов для переноса")
-        await callback.answer()
+    
+    text = (
+        f"📺 **Редактирование канала поста #{post['id']}**\n\n"
+        f"**Текущий канал:** {current_channel_name}\n\n"
+        f"**Выберите новый канал:**\n\n"
+    )
+    
+    # Список каналов с номерами
+    for i, channel in enumerate(channels, 1):
+        admin_status = "✅" if channel.get('is_admin_verified') else "❓"
+        text += f"{i}. {admin_status} {channel['name']}\n"
+    
+    text += (
+        f"\nТекстовые команды:\n"
+        f"• Номер канала (например: `1`)\n"
+        f"• @username канала\n"
+        f"• `skip` - оставить текущий канал\n"
+        f"• `cancel` - отменить редактирование"
+    )
+    
+    # Создаем кнопки для каналов
+    buttons = []
+    for i, channel in enumerate(channels):
+        admin_status = "✅" if channel.get('is_admin_verified') else "❓"
+        button_text = f"{admin_status} {channel['name']}"
+        buttons.append([InlineKeyboardButton(
+            text=button_text, 
+            callback_data=f"edit_channel_set:{post['id']}:{channel['id']}"
+        )])
+    
+    buttons.append([InlineKeyboardButton(text="⏭️ Пропустить", callback_data=f"edit_skip:{post['id']}:channel")])
+    buttons.append([InlineKeyboardButton(text="🔙 В меню", callback_data=f"edit_menu:{post['id']}")])
+    buttons.append([InlineKeyboardButton(text="❌ Отменить", callback_data=f"edit_cancel:{post['id']}")])
+    
+
+
+@router.message(EditPost.channel, F.text)
+async def handle_channel_edit_text_input(message: Message, state: FSMContext):
+    """Обработка текстового выбора канала при редактировании"""
+    data = await state.get_data()
+    post_id = data.get("editing_post_id")
+    user_settings = data["user_settings"]
+    
+    if is_command(message.text, "skip"):
+        await finish_field_edit(message, state, post_id, "channel", None)
         return
+    
+    if is_command(message.text, "cancel"):
+        await cancel_edit(message, state, post_id)
+        return
+    
+    project_id = user_settings.get("current_project")
+    channels = supabase_db.db.list_channels(project_id=project_id)
+    
+    text = message.text.strip()
+    channel = None
+    
+    # Поиск канала по номеру
+    if text.isdigit():
+        idx = int(text) - 1
+        if 0 <= idx < len(channels):
+            channel = channels[idx]
+    # Поиск по username или ID
+    else:
+        for ch in channels:
+            if (ch.get('username') and f"@{ch['username']}" == text) or \
+               str(ch['chat_id']) == text or \
+               str(ch['id']) == text:
+                channel = ch
+                break
+    
+    if not channel:
+        available_channels = ", ".join([f"{i+1}" for i in range(len(channels))])
+        await message.answer(
+            f"❌ **Канал не найден**\n\n"
+            f"Доступные варианты:\n"
+            f"• Номера каналов: {available_channels}\n"
+            f"• @username канала\n"
+            f"• `skip` - пропустить",
+            parse_mode="Markdown"
+        )
+        return
+    
+    # Получаем канал для получения chat_id
+    channel_data = {"channel_id": channel['id']}
+    if channel:
+        channel_data["chat_id"] = channel.get("chat_id")
+    
+
+
+# Глобальные обработчики для совместимости с main.py
+async def handle_edit_field_callback(callback: CallbackQuery, state: FSMContext):
+    """Глобальный обработчик редактирования полей (для main.py)"""
+    await handle_single_field_edit(callback, state)
+
+async def handle_edit_confirm_callback(callback: CallbackQuery, state: FSMContext):
+    """Глобальный обработчик подтверждения (для main.py)"""
+    await handle_edit_save(callback, state)
+
+# Экспортируемые функции для других модулей
+__all__ = [
+    'show_edit_main_menu',
+    'handle_edit_field_callback', 
+    'handle_edit_confirm_callback',
+    'handle_edit_menu_return',
+    'handle_edit_skip',
+    'handle_edit_save',
+    'handle_edit_cancel',
+    'handle_edit_recreate'
+]
     
     text = (
         f"📺 **Редактирование канала поста #{post['id']}**\n\n"
