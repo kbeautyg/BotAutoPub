@@ -32,13 +32,15 @@ import projects
 # Основные функциональные модули
 import main_menu
 import channels
-import create  # Используем исправленную версию create.py
-import scheduled_posts
+import scheduled_posts as create  # Используем улучшенную версию scheduled_posts.py вместо create.py
+import list_posts  # Импортируем list_posts для работы со списками
 import settings_improved
 import view_post
 
+# Улучшенные модули
+import edit_post  # Используем новый улучшенный редактор
+
 # Модули для совместимости (для работы с существующими постами)
-import edit_post
 import delete_post
 
 # Регистрируем роутеры в правильном порядке
@@ -47,11 +49,11 @@ dp.include_router(start.router)
 dp.include_router(help.router)
 dp.include_router(projects.router)
 dp.include_router(channels.router)
-dp.include_router(create.router)  # Исправленная версия
+dp.include_router(create.router)  # Улучшенная версия создания постов
 dp.include_router(view_post.router)
-dp.include_router(scheduled_posts.router)
+dp.include_router(list_posts.router)  # Добавляем router для списка постов
 dp.include_router(settings_improved.router)
-dp.include_router(edit_post.router)
+dp.include_router(edit_post.router)  # Новый улучшенный редактор
 dp.include_router(delete_post.router)
 dp.include_router(main_menu.router)  # В конце, чтобы не перехватывал команды
 
@@ -61,18 +63,26 @@ async def callback_edit_post_global(callback: CallbackQuery):
     """Глобальный обработчик команды редактирования поста"""
     post_id = int(callback.data.split(":", 1)[1])
     
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-    ])
+    # Эмулируем команду /edit через сообщение
+    class FakeMessage:
+        def __init__(self, text, from_user):
+            self.text = text
+            self.from_user = from_user
     
-    await callback.message.answer(
-        f"✏️ **Редактирование поста #{post_id}**\n\n"
-        f"Используйте команду `/edit {post_id}` для редактирования поста.",
-        parse_mode="Markdown",
-        reply_markup=keyboard
-    )
-    await callback.answer()
+    fake_message = FakeMessage(f"/edit {post_id}", callback.from_user)
+    
+    # Создаем пустое состояние FSM
+    from aiogram.fsm.context import FSMContext
+    from aiogram.fsm.storage.memory import MemoryStorage
+    
+    storage = MemoryStorage()
+    state = FSMContext(storage=storage, key=f"user:{callback.from_user.id}")
+    
+    # Вызываем команду редактирования
+    from edit_post_improved import cmd_edit
+    await cmd_edit(fake_message, state)
+    
+    await callback.answer("Запущено редактирование поста")
 
 @dp.callback_query(F.data.startswith("post_publish_cmd:"))
 async def callback_publish_post_global(callback: CallbackQuery):
@@ -257,6 +267,38 @@ async def callback_full_view_post_global(callback: CallbackQuery):
     
     await callback.message.answer(info_text, parse_mode="Markdown", reply_markup=keyboard)
     await callback.answer()
+
+# Обработчик для callback кнопки "Создать пост" из меню
+@dp.callback_query(F.data == "menu_create_post_direct")
+async def callback_create_post_direct(callback: CallbackQuery):
+    """Прямое создание поста через callback из меню"""
+    # Эмулируем команду /create через сообщение
+    class FakeMessage:
+        def __init__(self, text, from_user):
+            self.text = text
+            self.from_user = from_user
+    
+    fake_message = FakeMessage("/create", callback.from_user)
+    
+    # Создаем пустое состояние FSM
+    from aiogram.fsm.context import FSMContext
+    from aiogram.fsm.storage.memory import MemoryStorage
+    
+    storage = MemoryStorage()
+    state = FSMContext(storage=storage, key=f"user:{callback.from_user.id}")
+    
+    # Вызываем команду создания
+    from scheduled_posts import cmd_create_post
+    await cmd_create_post(fake_message, state)
+    
+    await callback.answer("Запущено создание поста")
+
+# Обработчик для меню постов
+@dp.callback_query(F.data == "posts_menu")
+async def callback_posts_menu_global(callback: CallbackQuery):
+    """Глобальный обработчик меню постов"""
+    from list_posts import callback_posts_menu
+    await callback_posts_menu(callback)
 
 # Import and start the scheduler
 import auto_post_fixed as auto_post
