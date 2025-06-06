@@ -63,14 +63,21 @@ async def callback_edit_post_global(callback: CallbackQuery):
     """Глобальный обработчик команды редактирования поста"""
     post_id = int(callback.data.split(":", 1)[1])
     
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Редактировать пост", callback_data=f"post_edit_direct:{post_id}")],
+        [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_full_view:{post_id}")],
+        [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")]
+    ])
+    
     # Отправляем сообщение о запуске редактирования
-    await callback.message.answer(
-        f"✏️ **Запуск редактирования поста #{post_id}**\n\n"
-        f"Используйте команду `/edit {post_id}` для редактирования поста.",
-        parse_mode="Markdown"
+    await callback.message.edit_text(
+        f"✏️ **Редактирование поста #{post_id}**\n\n"
+        f"Выберите действие:",
+        parse_mode="Markdown",
+        reply_markup=keyboard
     )
     
-    await callback.answer("Используйте команду /edit " + str(post_id))
+    await callback.answer()
 
 @dp.callback_query(F.data.startswith("post_publish_cmd:"))
 async def callback_publish_post_global(callback: CallbackQuery):
@@ -123,11 +130,12 @@ async def callback_reschedule_post_global(callback: CallbackQuery):
     post_id = int(callback.data.split(":", 1)[1])
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_full_view:{post_id}")],
         [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
     
-    await callback.message.answer(
+    await callback.message.edit_text(
         f"📅 **Перенос поста #{post_id}**\n\n"
         f"Используйте команду `/reschedule {post_id} YYYY-MM-DD HH:MM` для переноса поста.\n\n"
         f"Пример: `/reschedule {post_id} 2024-12-25 15:30`",
@@ -185,10 +193,15 @@ async def callback_confirm_delete_post_global(callback: CallbackQuery):
             reply_markup=keyboard
         )
     except Exception as e:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
         await callback.message.edit_text(
             f"❌ **Ошибка удаления**\n\n"
             f"Не удалось удалить пост: {str(e)}",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=keyboard
         )
     
     await callback.answer()
@@ -231,14 +244,14 @@ async def callback_full_view_post_global(callback: CallbackQuery):
     elif post.get('publish_time'):
         formatted_time = format_time_for_user(post['publish_time'], user)
         user_tz = user.get('timezone', 'UTC')
-        info_text += f"⏰ **Запланировано:** {formatted_time} ({user_tz})\n"
+        info_text += f"⏰ **Запланировано:** {formatted_time}\n"
     
     # Создаем клавиатуру действий
     buttons = []
     
     if not post.get('published'):
         buttons.append([
-            InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_cmd:{post_id}"),
+            InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_direct:{post_id}"),
             InlineKeyboardButton(text="🚀 Опубликовать", callback_data=f"post_publish_cmd:{post_id}")
         ])
         buttons.append([
@@ -260,12 +273,59 @@ async def callback_full_view_post_global(callback: CallbackQuery):
 @dp.callback_query(F.data == "menu_create_post_direct")
 async def callback_create_post_direct(callback: CallbackQuery):
     """Прямое создание поста через callback из меню"""
-    await callback.message.answer(
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📝 Пошаговое создание", callback_data="create_step_by_step")],
+        [InlineKeyboardButton(text="🚀 Быстрое создание", callback_data="create_quick_help")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
+    
+    await callback.message.edit_text(
         "📝 **Создание нового поста**\n\n"
-        "Используйте команду `/create` для создания поста.",
-        parse_mode="Markdown"
+        "Выберите способ создания поста:",
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+@dp.callback_query(F.data == "create_step_by_step")
+async def callback_create_step_by_step(callback: CallbackQuery):
+    """Пошаговое создание поста"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
+    
+    await callback.message.edit_text(
+        "📝 **Пошаговое создание поста**\n\n"
+        "Используйте команду `/create` для создания поста с пошаговым мастером.",
+        parse_mode="Markdown",
+        reply_markup=keyboard
     )
     await callback.answer("Используйте команду /create")
+
+@dp.callback_query(F.data == "create_quick_help")
+async def callback_create_quick_help(callback: CallbackQuery):
+    """Помощь по быстрому созданию"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📝 Пошаговое создание", callback_data="create_step_by_step")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
+    
+    await callback.message.edit_text(
+        "🚀 **Быстрое создание поста**\n\n"
+        "Используйте команду `/quickpost` для быстрого создания:\n\n"
+        "**Формат:** `/quickpost <канал> <время> <текст>`\n\n"
+        "**Примеры:**\n"
+        "• `/quickpost @channel now Текст поста`\n"
+        "• `/quickpost 1 draft Черновик поста`\n"
+        "• `/quickpost 2 2024-12-25_15:30 Запланированный пост`\n\n"
+        "**Параметры:**\n"
+        "• Канал: @username, ID или номер в списке\n"
+        "• Время: now, draft или YYYY-MM-DD_HH:MM\n"
+        "• Текст: содержимое поста",
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+    await callback.answer()
 
 # Обработчик для меню постов
 @dp.callback_query(F.data == "posts_menu")
