@@ -49,16 +49,20 @@ def get_welcome_text(user: dict, lang: str = "ru") -> str:
         text += "• ⏰ Автоматически публиковать контент\n"
         text += "• 📊 Отслеживать статистику\n\n"
         
-        if user.get('current_project'):
+        if user and user.get('current_project'):
             project = supabase_db.db.get_project(user['current_project'])
-            if project:
+            if project and project.get('name'):
                 text += f"📁 **Текущий проект:** {project['name']}\n"
         
         # Быстрая статистика
-        if user.get('current_project'):
-            channels = supabase_db.db.list_channels(project_id=user['current_project'])
-            posts = supabase_db.db.list_posts(project_id=user['current_project'], only_pending=True)
-            text += f"📺 Каналов: {len(channels)} | ⏰ Запланированных постов: {len(posts)}\n\n"
+        if user and user.get('current_project'):
+            try:
+                channels = supabase_db.db.list_channels(project_id=user['current_project'])
+                posts = supabase_db.db.list_posts(project_id=user['current_project'], only_pending=True)
+                text += f"📺 Каналов: {len(channels) if channels else 0} | ⏰ Запланированных постов: {len(posts) if posts else 0}\n\n"
+            except Exception as e:
+                print(f"Error getting stats for user: {e}")
+                text += "\n"
         
         text += "Выберите действие из меню ниже:"
     else:
@@ -69,16 +73,20 @@ def get_welcome_text(user: dict, lang: str = "ru") -> str:
         text += "• ⏰ Automatically publish content\n"
         text += "• 📊 Track statistics\n\n"
         
-        if user.get('current_project'):
+        if user and user.get('current_project'):
             project = supabase_db.db.get_project(user['current_project'])
-            if project:
+            if project and project.get('name'):
                 text += f"📁 **Current project:** {project['name']}\n"
         
         # Quick stats
-        if user.get('current_project'):
-            channels = supabase_db.db.list_channels(project_id=user['current_project'])
-            posts = supabase_db.db.list_posts(project_id=user['current_project'], only_pending=True)
-            text += f"📺 Channels: {len(channels)} | ⏰ Scheduled posts: {len(posts)}\n\n"
+        if user and user.get('current_project'):
+            try:
+                channels = supabase_db.db.list_channels(project_id=user['current_project'])
+                posts = supabase_db.db.list_posts(project_id=user['current_project'], only_pending=True)
+                text += f"📺 Channels: {len(channels) if channels else 0} | ⏰ Scheduled posts: {len(posts) if posts else 0}\n\n"
+            except Exception as e:
+                print(f"Error getting stats for user: {e}")
+                text += "\n"
         
         text += "Choose an action from the menu below:"
     
@@ -88,220 +96,320 @@ def get_welcome_text(user: dict, lang: str = "ru") -> str:
 async def cmd_main_menu(message: Message, state: FSMContext):
     """Показать главное меню"""
     user_id = message.from_user.id
-    user = supabase_db.db.ensure_user(user_id)
-    lang = user.get("language", "ru") if user else "ru"
-    
-    text = get_welcome_text(user, lang)
-    keyboard = get_main_menu_keyboard(lang)
-    
-    await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
+    try:
+        user = supabase_db.db.ensure_user(user_id)
+        lang = user.get("language", "ru") if user else "ru"
+        
+        text = get_welcome_text(user, lang)
+        keyboard = get_main_menu_keyboard(lang)
+        
+        await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
+    except Exception as e:
+        print(f"Error in cmd_main_menu: {e}")
+        await message.answer("❌ Произошла ошибка. Попробуйте позже.")
 
 @router.callback_query(F.data == "main_menu")
 async def callback_main_menu(callback: CallbackQuery):
     """Вернуться в главное меню"""
     user_id = callback.from_user.id
-    user = supabase_db.db.get_user(user_id)
-    lang = user.get("language", "ru") if user else "ru"
-    
-    text = get_welcome_text(user, lang)
-    keyboard = get_main_menu_keyboard(lang)
-    
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
-    await callback.answer()
+    try:
+        user = supabase_db.db.get_user(user_id)
+        if not user:
+            user = supabase_db.db.ensure_user(user_id)
+        lang = user.get("language", "ru") if user else "ru"
+        
+        text = get_welcome_text(user, lang)
+        keyboard = get_main_menu_keyboard(lang)
+        
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+        await callback.answer()
+    except Exception as e:
+        print(f"Error in callback_main_menu: {e}")
+        await callback.answer("❌ Произошла ошибка")
 
 @router.callback_query(F.data == "menu_create_post")
 async def callback_create_post(callback: CallbackQuery):
     """Создать пост"""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]
-    ])
-    
-    await callback.message.edit_text(
-        "📝 **Создание нового поста**\n\n"
-        "Используйте команду `/create` для создания поста с пошаговым мастером.\n\n"
-        "**Быстрое создание:**\n"
-        "• `/quickpost @канал now Текст поста` - опубликовать сейчас\n"
-        "• `/quickpost 1 draft Черновик` - сохранить черновик\n"
-        "• `/quickpost 2 2024-12-25_15:30 Запланированный пост`",
-        reply_markup=keyboard,
-        parse_mode="Markdown"
-    )
-    await callback.answer()
+    try:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]
+        ])
+        
+        await callback.message.edit_text(
+            "📝 **Создание нового поста**\n\n"
+            "Используйте команду `/create` для создания поста с пошаговым мастером.\n\n"
+            "**Быстрое создание:**\n"
+            "• `/quickpost @канал now Текст поста` - опубликовать сейчас\n"
+            "• `/quickpost 1 draft Черновик` - сохранить черновик\n"
+            "• `/quickpost 2 2024-12-25_15:30 Запланированный пост`",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+        await callback.answer()
+    except Exception as e:
+        print(f"Error in callback_create_post: {e}")
+        await callback.answer("❌ Произошла ошибка")
 
 @router.callback_query(F.data == "menu_posts")
 async def callback_posts_menu(callback: CallbackQuery):
     """Меню постов"""
-    # Импортируем функцию из list_posts
-    from list_posts import callback_posts_menu as posts_menu_handler
-    await posts_menu_handler(callback)
+    try:
+        # Импортируем функцию из list_posts
+        from list_posts import callback_posts_menu as posts_menu_handler
+        await posts_menu_handler(callback)
+    except Exception as e:
+        print(f"Error in callback_posts_menu: {e}")
+        await callback.answer("❌ Произошла ошибка")
 
 @router.callback_query(F.data == "menu_channels")
 async def callback_channels_menu(callback: CallbackQuery):
     """Меню каналов"""
-    # Импортируем функцию из channels
-    from channels import callback_channels_menu as channels_menu_handler
-    await channels_menu_handler(callback)
+    try:
+        # Импортируем функцию из channels
+        from channels import callback_channels_menu as channels_menu_handler
+        await channels_menu_handler(callback)
+    except Exception as e:
+        print(f"Error in callback_channels_menu: {e}")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]
+        ])
+        
+        await callback.message.edit_text(
+            "📺 **Управление каналами**\n\n"
+            "Используйте команду `/channels` для управления каналами.\n\n"
+            "**Команды:**\n"
+            "• `/channels` - список каналов\n"
+            "• `/channels add` - добавить канал\n"
+            "• `/channels remove <ID>` - удалить канал",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+        await callback.answer()
 
 @router.callback_query(F.data == "menu_projects")
 async def callback_projects_menu(callback: CallbackQuery):
     """Меню проектов"""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]
-    ])
-    
-    await callback.message.edit_text(
-        "📁 **Управление проектами**\n\n"
-        "Используйте команду `/project` для управления проектами.\n\n"
-        "**Команды:**\n"
-        "• `/project` - список проектов\n"
-        "• `/project new <название>` - создать проект\n"
-        "• `/project switch <ID>` - переключить проект\n"
-        "• `/project invite <user_id>` - пригласить пользователя",
-        reply_markup=keyboard,
-        parse_mode="Markdown"
-    )
-    await callback.answer()
+    try:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]
+        ])
+        
+        await callback.message.edit_text(
+            "📁 **Управление проектами**\n\n"
+            "Используйте команду `/project` для управления проектами.\n\n"
+            "**Команды:**\n"
+            "• `/project` - список проектов\n"
+            "• `/project new <название>` - создать проект\n"
+            "• `/project switch <ID>` - переключить проект\n"
+            "• `/project invite <user_id>` - пригласить пользователя",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+        await callback.answer()
+    except Exception as e:
+        print(f"Error in callback_projects_menu: {e}")
+        await callback.answer("❌ Произошла ошибка")
 
 @router.callback_query(F.data == "menu_settings")
 async def callback_settings_menu(callback: CallbackQuery):
     """Меню настроек"""
-    # Импортируем функцию из settings_improved
-    from settings_improved import callback_settings_menu as settings_menu_handler
-    await settings_menu_handler(callback)
+    try:
+        # Импортируем функцию из settings_improved
+        from settings_improved import callback_settings_menu as settings_menu_handler
+        await settings_menu_handler(callback)
+    except Exception as e:
+        print(f"Error in callback_settings_menu: {e}")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]
+        ])
+        
+        await callback.message.edit_text(
+            "⚙️ **Настройки**\n\n"
+            "Используйте команду `/settings` для настройки бота.\n\n"
+            "**Доступные настройки:**\n"
+            "• Часовой пояс\n"
+            "• Язык интерфейса\n"
+            "• Уведомления\n"
+            "• Формат даты и времени",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+        await callback.answer()
 
 @router.callback_query(F.data == "menu_help")
 async def callback_help_menu(callback: CallbackQuery):
     """Меню помощи"""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]
-    ])
-    
-    await callback.message.edit_text(
-        "❓ **Справка по боту**\n\n"
-        "Используйте команду `/help` для получения полной справки.\n\n"
-        "**Основные команды:**\n"
-        "• `/create` - создать пост\n"
-        "• `/list` - список постов\n"
-        "• `/channels` - управление каналами\n"
-        "• `/settings` - настройки\n\n"
-        "**Быстрые команды:**\n"
-        "• `/quickpost` - быстрое создание\n"
-        "• `/edit <ID>` - редактировать пост\n"
-        "• `/view <ID>` - просмотр поста",
-        reply_markup=keyboard,
-        parse_mode="Markdown"
-    )
-    await callback.answer()
+    try:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]
+        ])
+        
+        await callback.message.edit_text(
+            "❓ **Справка по боту**\n\n"
+            "Используйте команду `/help` для получения полной справки.\n\n"
+            "**Основные команды:**\n"
+            "• `/create` - создать пост\n"
+            "• `/list` - список постов\n"
+            "• `/channels` - управление каналами\n"
+            "• `/settings` - настройки\n\n"
+            "**Быстрые команды:**\n"
+            "• `/quickpost` - быстрое создание\n"
+            "• `/edit <ID>` - редактировать пост\n"
+            "• `/view <ID>` - просмотр поста",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+        await callback.answer()
+    except Exception as e:
+        print(f"Error in callback_help_menu: {e}")
+        await callback.answer("❌ Произошла ошибка")
 
 # Команды быстрого доступа
 @router.message(Command("quick"))
 async def cmd_quick_actions(message: Message, state: FSMContext):
     """Быстрые действия"""
-    user_id = message.from_user.id
-    user = supabase_db.db.ensure_user(user_id)
-    lang = user.get("language", "ru") if user else "ru"
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🚀 Быстрый пост", callback_data="quick_post")],
-        [InlineKeyboardButton(text="📊 Статистика", callback_data="quick_stats")],
-        [InlineKeyboardButton(text="⏰ Ближайшие посты", callback_data="quick_upcoming")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-    ])
-    
-    text = "⚡ **Быстрые действия**\n\nВыберите действие:"
-    await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
+    try:
+        user_id = message.from_user.id
+        user = supabase_db.db.ensure_user(user_id)
+        lang = user.get("language", "ru") if user else "ru"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🚀 Быстрый пост", callback_data="quick_post")],
+            [InlineKeyboardButton(text="📊 Статистика", callback_data="quick_stats")],
+            [InlineKeyboardButton(text="⏰ Ближайшие посты", callback_data="quick_upcoming")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        
+        text = "⚡ **Быстрые действия**\n\nВыберите действие:"
+        await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
+    except Exception as e:
+        print(f"Error in cmd_quick_actions: {e}")
+        await message.answer("❌ Произошла ошибка. Попробуйте позже.")
 
 @router.callback_query(F.data == "quick_post")
 async def callback_quick_post(callback: CallbackQuery):
     """Быстрое создание поста"""
-    await callback.message.answer(
-        "🚀 **Быстрое создание поста**\n\n"
-        "Используйте команду `/quickpost` для быстрого создания:\n\n"
-        "**Формат:** `/quickpost <канал> <время> <текст>`\n\n"
-        "**Примеры:**\n"
-        "• `/quickpost @channel now Текст поста`\n"
-        "• `/quickpost 1 draft Черновик поста`\n"
-        "• `/quickpost 2 2024-12-25_15:30 Запланированный пост`\n\n"
-        "Или используйте `/create` для полного контроля над постом.",
-        parse_mode="Markdown"
-    )
-    await callback.answer()
+    try:
+        await callback.message.answer(
+            "🚀 **Быстрое создание поста**\n\n"
+            "Используйте команду `/quickpost` для быстрого создания:\n\n"
+            "**Формат:** `/quickpost <канал> <время> <текст>`\n\n"
+            "**Примеры:**\n"
+            "• `/quickpost @channel now Текст поста`\n"
+            "• `/quickpost 1 draft Черновик поста`\n"
+            "• `/quickpost 2 2024-12-25_15:30 Запланированный пост`\n\n"
+            "Или используйте `/create` для полного контроля над постом.",
+            parse_mode="Markdown"
+        )
+        await callback.answer()
+    except Exception as e:
+        print(f"Error in callback_quick_post: {e}")
+        await callback.answer("❌ Произошла ошибка")
 
 @router.callback_query(F.data == "quick_stats")
 async def callback_quick_stats(callback: CallbackQuery):
     """Быстрая статистика"""
-    user_id = callback.from_user.id
-    user = supabase_db.db.get_user(user_id)
-    project_id = user.get("current_project")
-    
-    if not project_id:
-        await callback.message.edit_text("❌ Нет активного проекта.")
+    try:
+        user_id = callback.from_user.id
+        user = supabase_db.db.get_user(user_id)
+        if not user:
+            user = supabase_db.db.ensure_user(user_id)
+        
+        project_id = user.get("current_project") if user else None
+        
+        if not project_id:
+            await callback.message.edit_text("❌ Нет активного проекта.")
+            await callback.answer()
+            return
+        
+        try:
+            channels = supabase_db.db.list_channels(project_id=project_id) or []
+            all_posts = supabase_db.db.list_posts(project_id=project_id, only_pending=False) or []
+            scheduled = [p for p in all_posts if not p.get('published') and not p.get('draft') and p.get('publish_time')]
+            drafts = [p for p in all_posts if p.get('draft')]
+            published = [p for p in all_posts if p.get('published')]
+            
+            text = (
+                f"📊 **Быстрая статистика**\n\n"
+                f"📺 Каналов: {len(channels)}\n"
+                f"⏰ Запланированных: {len(scheduled)}\n"
+                f"📝 Черновиков: {len(drafts)}\n"
+                f"✅ Опубликованных: {len(published)}\n"
+            )
+        except Exception as e:
+            print(f"Error getting stats: {e}")
+            text = "📊 **Быстрая статистика**\n\n❌ Ошибка загрузки данных"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Подробнее", callback_data="menu_posts")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
         await callback.answer()
-        return
-    
-    channels = supabase_db.db.list_channels(project_id=project_id)
-    all_posts = supabase_db.db.list_posts(project_id=project_id, only_pending=False)
-    scheduled = [p for p in all_posts if not p.get('published') and not p.get('draft') and p.get('publish_time')]
-    drafts = [p for p in all_posts if p.get('draft')]
-    published = [p for p in all_posts if p.get('published')]
-    
-    text = (
-        f"📊 **Быстрая статистика**\n\n"
-        f"📺 Каналов: {len(channels)}\n"
-        f"⏰ Запланированных: {len(scheduled)}\n"
-        f"📝 Черновиков: {len(drafts)}\n"
-        f"✅ Опубликованных: {len(published)}\n"
-    )
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Подробнее", callback_data="menu_posts")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-    ])
-    
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
-    await callback.answer()
+    except Exception as e:
+        print(f"Error in callback_quick_stats: {e}")
+        await callback.answer("❌ Произошла ошибка")
 
 @router.callback_query(F.data == "quick_upcoming")
 async def callback_quick_upcoming(callback: CallbackQuery):
     """Ближайшие посты"""
-    user_id = callback.from_user.id
-    user = supabase_db.db.get_user(user_id)
-    project_id = user.get("current_project")
-    
-    if not project_id:
-        await callback.message.edit_text("❌ Нет активного проекта.")
+    try:
+        user_id = callback.from_user.id
+        user = supabase_db.db.get_user(user_id)
+        if not user:
+            user = supabase_db.db.ensure_user(user_id)
+        
+        project_id = user.get("current_project") if user else None
+        
+        if not project_id:
+            await callback.message.edit_text("❌ Нет активного проекта.")
+            await callback.answer()
+            return
+        
+        try:
+            posts = supabase_db.db.get_scheduled_posts_by_channel(project_id) or []
+            
+            if not posts:
+                text = "⏰ **Ближайшие посты**\n\n❌ Нет запланированных постов."
+            else:
+                text = "⏰ **Ближайшие посты**\n\n"
+                for i, post in enumerate(posts[:5], 1):  # Показываем первые 5
+                    try:
+                        from datetime import datetime
+                        from zoneinfo import ZoneInfo
+                        
+                        if post.get('publish_time'):
+                            utc_time = datetime.fromisoformat(post['publish_time'].replace('Z', '+00:00'))
+                            if user.get('timezone'):
+                                user_tz = ZoneInfo(user['timezone'])
+                                local_time = utc_time.astimezone(user_tz)
+                                time_str = local_time.strftime('%m-%d %H:%M')
+                            else:
+                                time_str = utc_time.strftime('%m-%d %H:%M')
+                            
+                            channel_name = "Канал"
+                            if post.get('channels') and isinstance(post['channels'], dict):
+                                channel_name = post['channels'].get('name', 'Канал')
+                            
+                            post_text = post.get('text', 'Без текста')[:25]
+                            text += f"{i}. **{time_str}** - {channel_name}\n   {post_text}...\n\n"
+                        else:
+                            text += f"{i}. Пост #{post.get('id', '?')}\n\n"
+                    except Exception as e:
+                        print(f"Error formatting post {post}: {e}")
+                        text += f"{i}. Пост #{post.get('id', '?')}\n\n"
+        except Exception as e:
+            print(f"Error getting upcoming posts: {e}")
+            text = "⏰ **Ближайшие посты**\n\n❌ Ошибка загрузки данных"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Все посты", callback_data="posts_scheduled")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
         await callback.answer()
-        return
-    
-    posts = supabase_db.db.get_scheduled_posts_by_channel(project_id)
-    
-    if not posts:
-        text = "⏰ **Ближайшие посты**\n\n❌ Нет запланированных постов."
-    else:
-        text = "⏰ **Ближайшие посты**\n\n"
-        for i, post in enumerate(posts[:5], 1):  # Показываем первые 5
-            try:
-                from datetime import datetime
-                from zoneinfo import ZoneInfo
-                
-                utc_time = datetime.fromisoformat(post['publish_time'].replace('Z', '+00:00'))
-                if user.get('timezone'):
-                    user_tz = ZoneInfo(user['timezone'])
-                    local_time = utc_time.astimezone(user_tz)
-                    time_str = local_time.strftime('%m-%d %H:%M')
-                else:
-                    time_str = utc_time.strftime('%m-%d %H:%M')
-                
-                channel_name = post.get('channels', {}).get('name', 'Канал')
-                post_text = post.get('text', 'Без текста')[:25]
-                text += f"{i}. **{time_str}** - {channel_name}\n   {post_text}...\n\n"
-            except:
-                text += f"{i}. Пост #{post['id']}\n\n"
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Все посты", callback_data="posts_scheduled")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-    ])
-    
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
-    await callback.answer()
+    except Exception as e:
+        print(f"Error in callback_quick_upcoming: {e}")
+        await callback.answer("❌ Произошла ошибка")
