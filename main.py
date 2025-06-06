@@ -79,7 +79,7 @@ async def callback_edit_post_global(callback: CallbackQuery):
     state = FSMContext(storage=storage, key=f"user:{callback.from_user.id}")
     
     # Вызываем команду редактирования
-    from edit_post_improved import cmd_edit
+    from edit_post import cmd_edit
     await cmd_edit(fake_message, state)
     
     await callback.answer("Запущено редактирование поста")
