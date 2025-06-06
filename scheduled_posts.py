@@ -109,33 +109,54 @@ def get_edit_menu_keyboard(lang: str = "ru"):
         [InlineKeyboardButton(text="🔙 К предпросмотру", callback_data="post_preview")]
     ])
 
-def get_post_actions_keyboard(post_id: int):
+def get_post_actions_keyboard(post_id: int, is_scheduled: bool = False):
     """Клавиатура действий с постом после создания"""
+    buttons = []
+    
+    # Кнопки просмотра
+    buttons.append([
+        InlineKeyboardButton(text="👀 Просмотр", callback_data=f"post_full_view:{post_id}"),
+    ])
+    
+    # Если пост запланирован, предлагаем редактирование
+    if is_scheduled:
+        buttons.append([
+            InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_cmd:{post_id}"),
+            InlineKeyboardButton(text="🗑 Удалить", callback_data=f"post_delete_cmd:{post_id}")
+        ])
+    
+    # Навигационные кнопки
+    buttons.append([
+        InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu"),
+        InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+    ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_edit_offer_keyboard(post_id: int, lang: str = "ru"):
+    """Клавиатура предложения редактирования для запланированного поста"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="👀 Просмотр", callback_data=f"post_full_view:{post_id}"),
-            InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_cmd:{post_id}")
-        ],
-        [
-            InlineKeyboardButton(text="🗑 Удалить", callback_data=f"post_delete_cmd:{post_id}"),
-            InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")
-        ],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            InlineKeyboardButton(text="✏️ Да, редактировать", callback_data=f"post_edit_cmd:{post_id}"),
+            InlineKeyboardButton(text="✅ Нет, всё хорошо", callback_data="edit_offer_decline")
+        ]
     ])
 
-def validate_post_data(data: dict) -> tuple[bool, str]:
-    """Валидация данных поста перед созданием"""
-    # Проверяем обязательные поля
-    if not data.get("channel_id"):
-        return False, "Не выбран канал для публикации"
+def get_content_missing_keyboard(lang: str = "ru"):
+    """Клавиатура для случая отсутствия контента"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📝 Добавить текст", callback_data="missing_content_add_text")],
+        [InlineKeyboardButton(text="🖼 Добавить медиа", callback_data="missing_content_add_media")],
+        [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
+    ])
+
+def validate_post_content(data: dict) -> tuple[bool, str]:
+    """Валидация контента поста (текст или медиа должны быть)"""
+    has_text = bool(data.get("text") and data.get("text").strip())
+    has_media = bool(data.get("media_file_id"))
     
-    # Проверяем, что есть хотя бы текст или медиа
-    if not data.get("text") and not data.get("media_file_id"):
+    if not has_text and not has_media:
         return False, "Пост должен содержать текст или медиа"
-    
-    # Проверяем время публикации
-    if not data.get("draft") and not data.get("publish_time"):
-        return False, "Не указано время публикации и пост не является черновиком"
     
     return True, ""
 
@@ -267,7 +288,10 @@ async def cmd_quick_post(message: Message, state: FSMContext):
     
     if post:
         status = "📝 черновик" if draft else "⏰ запланирован" if publish_time else "создан"
-        keyboard = get_post_actions_keyboard(post['id'])
+        
+        # Определяем, запланирован ли пост
+        is_scheduled = not draft and publish_time and publish_time > datetime.now(ZoneInfo("UTC"))
+        keyboard = get_post_actions_keyboard(post['id'], is_scheduled)
         
         await message.answer(
             f"✅ **Пост #{post['id']} {status}**\n\n"
@@ -351,6 +375,13 @@ async def handle_media_input(message: Message, state: FSMContext):
         data = await state.get_data()
         data["step_history"].append("step_media")
         await state.set_data(data)
+        
+        # ВАЖНО: Проверяем контент после медиа-шага
+        is_valid, error_msg = validate_post_content(data)
+        if not is_valid:
+            await show_content_missing_dialog(message, state, lang)
+            return
+        
         await start_format_step(message, state, lang)
         return
     
@@ -395,6 +426,43 @@ async def handle_media_input(message: Message, state: FSMContext):
                 "Или отправьте медиа файл",
                 parse_mode="Markdown"
             )
+
+async def show_content_missing_dialog(message: Message, state: FSMContext, lang: str):
+    """Показать диалог об отсутствии контента"""
+    text = (
+        "⚠️ **Пост должен содержать контент**\n\n"
+        "Ваш пост не содержит ни текста, ни медиа.\n"
+        "Пост должен иметь хотя бы что-то одно.\n\n"
+        "Что хотите добавить?"
+    )
+    
+    keyboard = get_content_missing_keyboard(lang)
+    await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
+
+@router.callback_query(F.data == "missing_content_add_text")
+async def handle_missing_content_add_text(callback: CallbackQuery, state: FSMContext):
+    """Добавить текст когда контент отсутствует"""
+    user = supabase_db.db.get_user(callback.from_user.id)
+    lang = user.get("language", "ru") if user else "ru"
+    
+    # Возвращаемся к шагу текста
+    data = await state.get_data()
+    # Убираем step_media из истории, чтобы вернуться к тексту
+    if "step_media" in data.get("step_history", []):
+        data["step_history"].remove("step_media")
+    await state.set_data(data)
+    
+    await callback.answer()
+    await start_text_step(callback.message, state, lang)
+
+@router.callback_query(F.data == "missing_content_add_media")
+async def handle_missing_content_add_media(callback: CallbackQuery, state: FSMContext):
+    """Добавить медиа когда контент отсутствует"""
+    user = supabase_db.db.get_user(callback.from_user.id)
+    lang = user.get("language", "ru") if user else "ru"
+    
+    await callback.answer()
+    await start_media_step(callback.message, state, lang)
 
 async def start_format_step(message: Message, state: FSMContext, lang: str):
     """Шаг 3: Выбор формата"""
@@ -828,23 +896,10 @@ async def handle_channel_selection(callback: CallbackQuery, state: FSMContext):
     await start_preview_step(callback.message, state, lang)
 
 async def start_preview_step(message: Message, state: FSMContext, lang: str):
-    """Шаг 7: Предварительный просмотр"""
+    """Шаг 7: Предварительный просмотр (БЕЗ валидации - она уже была)"""
     await state.set_state(PostCreationFlow.step_preview)
     
     data = await state.get_data()
-    
-    # Валидация данных перед предпросмотром
-    is_valid, error_msg = validate_post_data(data)
-    if not is_valid:
-        await message.answer(
-            f"❌ **Ошибка валидации**\n\n{error_msg}\n\n"
-            f"Используйте кнопки ниже для исправления или отмены.",
-            parse_mode="Markdown"
-        )
-        
-        # Показываем меню редактирования для исправления
-        await handle_edit_menu_text(message, state, is_callback=False)
-        return
     
     # Получаем информацию о канале
     channel = supabase_db.db.get_channel(data["channel_id"])
@@ -1000,16 +1055,6 @@ async def handle_post_confirmation_text(message: Message, state: FSMContext, is_
         user = supabase_db.db.get_user(data.get("user_id"))
         lang = user.get("language", "ru") if user else "ru"
         
-        # Финальная валидация
-        is_valid, error_msg = validate_post_data(data)
-        if not is_valid:
-            error_text = f"❌ **Ошибка создания поста**\n\n{error_msg}"
-            if is_callback:
-                await message.edit_text(error_text, parse_mode="Markdown")
-            else:
-                await message.answer(error_text, parse_mode="Markdown")
-            return
-        
         # Подготовка данных для сохранения
         post_data = {
             "user_id": data["user_id"],
@@ -1043,19 +1088,48 @@ async def handle_post_confirmation_text(message: Message, state: FSMContext, is_
         if post:
             if data.get("draft"):
                 status_text = "📝 **Черновик сохранен**"
+                is_scheduled = False
             elif data.get("publish_time"):
-                status_text = "⏰ **Пост запланирован**"
+                # Проверяем, запланирован ли пост на будущее
+                if isinstance(data["publish_time"], datetime):
+                    is_scheduled = data["publish_time"] > datetime.now(ZoneInfo("UTC"))
+                else:
+                    is_scheduled = True  # Предполагаем что запланирован
+                
+                if is_scheduled:
+                    status_text = "⏰ **Пост запланирован**"
+                    # Предлагаем редактирование для запланированного поста
+                    response_text = (
+                        f"{status_text}\n\n"
+                        f"**ID поста:** #{post['id']}\n\n"
+                        f"✅ Пост создан успешно!\n\n"
+                        f"🤔 **Хотите что-то изменить в посте?**"
+                    )
+                    
+                    keyboard = get_edit_offer_keyboard(post['id'], lang)
+                    
+                    if is_callback:
+                        await message.edit_text(response_text, parse_mode="Markdown", reply_markup=keyboard)
+                    else:
+                        await message.answer(response_text, parse_mode="Markdown", reply_markup=keyboard)
+                    
+                    await state.clear()
+                    return
+                else:
+                    status_text = "🚀 **Пост будет опубликован**"
+                    is_scheduled = False
             else:
                 status_text = "🚀 **Пост будет опубликован**"
+                is_scheduled = False
             
-            # Создаем клавиатуру с действиями
-            keyboard = get_post_actions_keyboard(post['id'])
-            
+            # Для немедленной публикации или черновиков - обычная клавиатура
             response_text = (
                 f"{status_text}\n\n"
                 f"**ID поста:** #{post['id']}\n\n"
                 f"✅ Пост создан успешно!"
             )
+            
+            keyboard = get_post_actions_keyboard(post['id'], is_scheduled)
             
             if is_callback:
                 await message.edit_text(response_text, parse_mode="Markdown", reply_markup=keyboard)
@@ -1094,6 +1168,16 @@ async def handle_post_confirmation_text(message: Message, state: FSMContext, is_
             pass
         
         await state.clear()
+
+@router.callback_query(F.data == "edit_offer_decline")
+async def handle_edit_offer_decline(callback: CallbackQuery):
+    """Отклонение предложения редактирования"""
+    await callback.message.edit_text(
+        "✅ **Отлично!**\n\n"
+        "Пост готов к публикации в запланированное время.",
+        parse_mode="Markdown"
+    )
+    await callback.answer()
 
 @router.callback_query(F.data == "post_edit_menu")
 async def handle_edit_menu(callback: CallbackQuery, state: FSMContext):
@@ -1365,6 +1449,14 @@ async def handle_nav_skip(callback: CallbackQuery, state: FSMContext):
     elif current_state == PostCreationFlow.step_media:
         data["step_history"].append("step_media")
         await state.set_data(data)
+        
+        # Проверяем контент после пропуска медиа
+        is_valid, error_msg = validate_post_content(data)
+        if not is_valid:
+            await show_content_missing_dialog(callback.message, state, lang)
+            await callback.answer()
+            return
+        
         await start_format_step(callback.message, state, lang)
     elif current_state == PostCreationFlow.step_format:
         data["step_history"].append("step_format")
