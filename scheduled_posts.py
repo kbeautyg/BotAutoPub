@@ -1,75 +1,4 @@
-@router.callback_query(F.data.startswith("format_"))
-async def handle_format_selection(callback: CallbackQuery, state: FSMContext):
-    """Обработка выбора формата через кнопки"""
-    user = supabase_db.db.get_user(callback.from_user.id)
-    lang = user.get("language", "ru") if user else "ru"
-    
-    format_map = {
-        "format_html": "HTML",
-        "format_markdown": "Markdown",
-        "format_none": None
-    }
-    
-    data = await state.get_data()
-    data["parse_mode"] = format_map.get(callback.data, "HTML")
-    
-    if data.get("editing_mode"):
-        # В режиме редактирования возвращаемся к предпросмотру
-        await state.set_data(data)
-        await callback.answer()
-        await start_preview_step(callback.message, state, lang)
-    else:
-        # В режиме создания переходим к следующему шагу
-        data["step_history"].append("step_format")
-        await state.set_data(data)
-        await callback.answer()
-        await start_buttons_step(callback.message, state, lang)
-
-@router.callback_query(F.data == "time_now")
-async def handle_time_now(callback: CallbackQuery, state: FSMContext):
-    """Опубликовать сейчас"""
-    user = supabase_db.db.get_user(callback.from_user.id)
-    lang = user.get("language", "ru") if user else "ru"
-    
-    data = await state.get_data()
-    data["publish_time"] = datetime.now(ZoneInfo("UTC"))
-    data["draft"] = False
-    
-    if data.get("editing_mode"):
-        # В режиме редактирования возвращаемся к предпросмотру
-        await state.set_data(data)
-        await callback.answer()
-        await start_preview_step(callback.message, state, lang)
-    else:
-        # В режиме создания переходим к следующему шагу
-        data["step_history"].append("step_time")
-        await state.set_data(data)
-        await callback.answer()
-        await start_channel_step(callback.message, state, lang)
-
-@router.callback_query(F.data == "time_draft")
-async def handle_time_draft(callback: CallbackQuery, state: FSMContext):
-    """Сохранить как черновик"""
-    user = supabase_db.db.get_user(callback.from_user.id)
-    lang = user.get("language", "ru") if user else "ru"
-    
-    data = await state.get_data()
-    data["publish_time"] = None
-    data["draft"] = True
-    
-    if data.get("editing_mode"):
-        # В режиме редактирования возвращаемся к предпросмотру
-        await state.set_data(data)
-        await callback.answer()
-        await start_preview_step(callback.message, state, lang)
-    else:
-        # В режиме создания переходим к следующему шагу
-        data["step_history"].append("step_time")
-        await state.set_data(data)
-        await callback.answer()
-        await start_channel_step(callback.message, state, lang)
-
-@router.callback_query(F.datafrom aiogram import Router, types, F
+from aiogram import Router, types, F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -177,9 +106,7 @@ def get_edit_menu_keyboard(lang: str = "ru"):
         [InlineKeyboardButton(text="🔘 Изменить кнопки", callback_data="edit_field:buttons")],
         [InlineKeyboardButton(text="⏰ Изменить время", callback_data="edit_field:time")],
         [InlineKeyboardButton(text="📺 Изменить канал", callback_data="edit_field:channel")],
-        [InlineKeyboardButton(text="👀 К предпросмотру", callback_data="post_preview")],
-        [InlineKeyboardButton(text="🔄 Заполнить заново", callback_data="edit_restart_creation")],
-        [InlineKeyboardButton(text="🏠 В меню", callback_data="main_menu")]
+        [InlineKeyboardButton(text="🔙 К предпросмотру", callback_data="post_preview")]
     ])
 
 def get_post_actions_keyboard(post_id: int, is_scheduled: bool = False):
@@ -434,22 +361,14 @@ async def handle_text_input(message: Message, state: FSMContext):
     user = supabase_db.db.get_user(message.from_user.id)
     lang = user.get("language", "ru") if user else "ru"
     
-    data = await state.get_data()
-    
     # Проверяем текстовые команды
     if is_command(message.text, "skip"):
+        data = await state.get_data()
         data["text"] = None
-        if data.get("editing_mode"):
-            # В режиме редактирования возвращаемся к предпросмотру
-            await state.set_data(data)
-            await start_preview_step(message, state, lang)
-            return
-        else:
-            # В режиме создания переходим к следующему шагу
-            data["step_history"].append("step_text")
-            await state.set_data(data)
-            await start_media_step(message, state, lang)
-            return
+        data["step_history"].append("step_text")
+        await state.set_data(data)
+        await start_media_step(message, state, lang)
+        return
     
     if is_command(message.text, "cancel"):
         await state.clear()
@@ -460,17 +379,12 @@ async def handle_text_input(message: Message, state: FSMContext):
         return
     
     # Сохраняем текст
+    data = await state.get_data()
     data["text"] = message.text
+    data["step_history"].append("step_text")
+    await state.set_data(data)
     
-    if data.get("editing_mode"):
-        # В режиме редактирования возвращаемся к предпросмотру
-        await state.set_data(data)
-        await start_preview_step(message, state, lang)
-    else:
-        # В режиме создания переходим к следующему шагу
-        data["step_history"].append("step_text")
-        await state.set_data(data)
-        await start_media_step(message, state, lang)
+    await start_media_step(message, state, lang)
 
 async def start_media_step(message: Message, state: FSMContext, lang: str):
     """Шаг 2: Добавление медиа"""
@@ -495,32 +409,23 @@ async def handle_media_input(message: Message, state: FSMContext):
     user = supabase_db.db.get_user(message.from_user.id)
     lang = user.get("language", "ru") if user else "ru"
     
-    data = await state.get_data()
-    
     # Проверяем текстовые команды
     if message.text and is_command(message.text, "skip"):
-        if data.get("editing_mode"):
-            # В режиме редактирования возвращаемся к предпросмотру
-            await state.set_data(data)
-            await start_preview_step(message, state, lang)
+        data = await state.get_data()
+        data["step_history"].append("step_media")
+        await state.set_data(data)
+        
+        # ВАЖНО: Проверяем контент после медиа-шага
+        is_valid, error_msg = validate_post_content(data)
+        if not is_valid:
+            await show_content_missing_dialog(message, state, lang)
             return
-        else:
-            # В режиме создания переходим к следующему шагу
-            data["step_history"].append("step_media")
-            await state.set_data(data)
-            
-            # ВАЖНО: Проверяем контент после медиа-шага
-            is_valid, error_msg = validate_post_content(data)
-            if not is_valid:
-                await show_content_missing_dialog(message, state, lang)
-                return
-            
-            await start_format_step(message, state, lang)
-            return
+        
+        await start_format_step(message, state, lang)
+        return
     
     if message.text and is_command(message.text, "back"):
-        if not data.get("editing_mode"):
-            await go_back_step(message, state, lang)
+        await go_back_step(message, state, lang)
         return
     
     if message.text and is_command(message.text, "cancel"):
@@ -533,6 +438,7 @@ async def handle_media_input(message: Message, state: FSMContext):
     
     # Обработка медиа
     media_handled = False
+    data = await state.get_data()
     
     if message.photo:
         data["media_type"] = "photo"
@@ -548,15 +454,9 @@ async def handle_media_input(message: Message, state: FSMContext):
         media_handled = True
     
     if media_handled:
-        if data.get("editing_mode"):
-            # В режиме редактирования возвращаемся к предпросмотру
-            await state.set_data(data)
-            await start_preview_step(message, state, lang)
-        else:
-            # В режиме создания переходим к следующему шагу
-            data["step_history"].append("step_media")
-            await state.set_data(data)
-            await start_format_step(message, state, lang)
+        data["step_history"].append("step_media")
+        await state.set_data(data)
+        await start_format_step(message, state, lang)
     else:
         if message.text:
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -743,26 +643,17 @@ async def handle_buttons_input(message: Message, state: FSMContext):
     user = supabase_db.db.get_user(message.from_user.id)
     lang = user.get("language", "ru") if user else "ru"
     
-    data = await state.get_data()
-    
     # Проверяем команды
     if is_command(message.text, "skip"):
+        data = await state.get_data()
         data["buttons"] = None
-        if data.get("editing_mode"):
-            # В режиме редактирования возвращаемся к предпросмотру
-            await state.set_data(data)
-            await start_preview_step(message, state, lang)
-            return
-        else:
-            # В режиме создания переходим к следующему шагу
-            data["step_history"].append("step_buttons")
-            await state.set_data(data)
-            await start_time_step(message, state, lang)
-            return
+        data["step_history"].append("step_buttons")
+        await state.set_data(data)
+        await start_time_step(message, state, lang)
+        return
     
     if is_command(message.text, "back"):
-        if not data.get("editing_mode"):
-            await go_back_step(message, state, lang)
+        await go_back_step(message, state, lang)
         return
     
     if is_command(message.text, "cancel"):
@@ -804,17 +695,12 @@ async def handle_buttons_input(message: Message, state: FSMContext):
             )
             return
         
+        data = await state.get_data()
         data["buttons"] = buttons
+        data["step_history"].append("step_buttons")
+        await state.set_data(data)
         
-        if data.get("editing_mode"):
-            # В режиме редактирования возвращаемся к предпросмотру
-            await state.set_data(data)
-            await start_preview_step(message, state, lang)
-        else:
-            # В режиме создания переходим к следующему шагу
-            data["step_history"].append("step_buttons")
-            await state.set_data(data)
-            await start_time_step(message, state, lang)
+        await start_time_step(message, state, lang)
         
     except Exception as e:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -1103,31 +989,17 @@ async def handle_channel_selection(callback: CallbackQuery, state: FSMContext):
     
     data = await state.get_data()
     data["channel_id"] = channel_id
+    data["step_history"].append("step_channel")
+    await state.set_data(data)
     
-    if data.get("editing_mode"):
-        # В режиме редактирования возвращаемся к предпросмотру
-        await state.set_data(data)
-        await callback.answer()
-        await start_preview_step(callback.message, state, lang)
-    else:
-        # В режиме создания переходим к следующему шагу
-        data["step_history"].append("step_channel")
-        await state.set_data(data)
-        await callback.answer()
-        await start_preview_step(callback.message, state, lang)
+    await callback.answer()
+    await start_preview_step(callback.message, state, lang)
 
 async def start_preview_step(message: Message, state: FSMContext, lang: str):
     """Шаг 7: Предварительный просмотр (БЕЗ валидации - она уже была)"""
     await state.set_state(PostCreationFlow.step_preview)
     
     data = await state.get_data()
-    
-    # Очищаем флаги редактирования если возвращаемся к предпросмотру
-    if "editing_mode" in data:
-        del data["editing_mode"]
-    if "editing_field" in data:
-        del data["editing_field"]
-    await state.set_data(data)
     
     # Получаем информацию о канале
     channel = supabase_db.db.get_channel(data["channel_id"])
@@ -1485,7 +1357,15 @@ async def handle_edit_menu_text(message: Message, state: FSMContext, is_callback
     text = (
         "✏️ **Редактирование поста**\n\n"
         "**Что хотите изменить?**\n\n"
-        "Выберите что именно нужно изменить, или начните заново:"
+        "Текстовые команды:\n"
+        "• `text` - изменить текст\n"
+        "• `media` - изменить медиа\n"
+        "• `format` - изменить формат\n"
+        "• `buttons` - изменить кнопки\n"
+        "• `time` - изменить время\n"
+        "• `channel` - изменить канал\n"
+        "• `back` - к предпросмотру\n"
+        "• `cancel` - отменить"
     )
     
     # Устанавливаем состояние редактирования
@@ -1500,64 +1380,6 @@ async def handle_edit_menu_text(message: Message, state: FSMContext, is_callback
         await message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
     else:
         await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
-
-# Обработчик для перезапуска создания поста
-@router.callback_query(F.data == "edit_restart_creation")
-async def handle_restart_creation(callback: CallbackQuery, state: FSMContext):
-    """Перезапустить создание поста с самого начала"""
-    user_id = callback.from_user.id
-    user = supabase_db.db.ensure_user(user_id)
-    lang = user.get("language", "ru") if user else "ru"
-    
-    # Проверяем наличие проекта
-    project_id = user.get("current_project")
-    if not project_id:
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📁 Создать проект", callback_data="proj_new")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-        ])
-        await callback.message.edit_text(
-            "❌ Нет активного проекта. Создайте проект через /project",
-            reply_markup=keyboard
-        )
-        await callback.answer()
-        return
-    
-    # Проверяем наличие каналов
-    channels = supabase_db.db.list_channels(project_id=project_id)
-    if not channels:
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📺 Добавить канал", callback_data="channels_add")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-        ])
-        await callback.message.edit_text(
-            "❌ **Нет доступных каналов**\n\n"
-            "Сначала добавьте канал через /channels",
-            parse_mode="Markdown",
-            reply_markup=keyboard
-        )
-        await callback.answer()
-        return
-    
-    # Полностью сбрасываем состояние и начинаем заново
-    await state.set_data({
-        "user_id": user_id,
-        "project_id": project_id,
-        "text": None,
-        "media_type": None,
-        "media_file_id": None,
-        "parse_mode": "HTML",
-        "buttons": None,
-        "publish_time": None,
-        "repeat_interval": None,
-        "channel_id": None,
-        "draft": False,
-        "step_history": [],
-        "current_step": "step_text"
-    })
-    
-    await callback.answer("🔄 Начинаем заново!")
-    await start_text_step(callback.message, state, lang)
 
 # Обработчик текстовых команд редактирования (только в режиме редактирования)
 async def edit_commands_filter(message):
