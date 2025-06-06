@@ -61,7 +61,14 @@ async def cmd_list_posts(message: Message):
     project_id = user.get("current_project") if user else None
     
     if not project_id:
-        await message.answer("❌ Нет активного проекта. Создайте проект через /project")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📁 Создать проект", callback_data="proj_new")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer(
+            "❌ Нет активного проекта. Создайте проект через /project",
+            reply_markup=keyboard
+        )
         return
     
     # Получаем все посты
@@ -145,7 +152,14 @@ async def callback_posts_menu(callback: CallbackQuery):
     project_id = user.get("current_project") if user else None
     
     if not project_id:
-        await callback.message.edit_text("❌ Нет активного проекта.")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📁 Создать проект", callback_data="proj_new")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await callback.message.edit_text(
+            "❌ Нет активного проекта.",
+            reply_markup=keyboard
+        )
         await callback.answer()
         return
     
@@ -209,7 +223,11 @@ async def callback_posts_scheduled(callback: CallbackQuery):
     project_id = user.get("current_project") if user else None
     
     if not project_id:
-        await callback.answer("Нет активного проекта")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="posts_menu")]
+        ])
+        await callback.message.edit_text("❌ Нет активного проекта", reply_markup=keyboard)
+        await callback.answer()
         return
     
     # Получаем запланированные посты
@@ -217,6 +235,10 @@ async def callback_posts_scheduled(callback: CallbackQuery):
     
     if not posts:
         text = "⏰ **Запланированные посты**\n\n❌ Нет запланированных постов."
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📝 Создать пост", callback_data="menu_create_post_direct")],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="posts_menu")]
+        ])
     else:
         text = "⏰ **Запланированные посты**\n\n"
         
@@ -237,22 +259,24 @@ async def callback_posts_scheduled(callback: CallbackQuery):
             post_text = post.get("text", "Без текста")[:50]
             
             text += f"• #{post['id']} {time_str}\n  {post_text}...\n"
+        
+        # Добавляем кнопки для навигации по постам
+        buttons = []
+        if posts:
+            # Показываем первые 5 постов как кнопки
+            for post in posts[:5]:
+                channel_info = post.get("channels", {})
+                channel_name = channel_info.get("name", "?")[:10]
+                buttons.append([InlineKeyboardButton(
+                    text=f"#{post['id']} • {channel_name}",
+                    callback_data=f"post_view:{post['id']}"
+                )])
+        
+        buttons.append([InlineKeyboardButton(text="📝 Создать пост", callback_data="menu_create_post_direct")])
+        buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="posts_menu")])
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     
-    # Добавляем кнопки для навигации по постам
-    buttons = []
-    if posts:
-        # Показываем первые 5 постов как кнопки
-        for post in posts[:5]:
-            channel_info = post.get("channels", {})
-            channel_name = channel_info.get("name", "?")[:10]
-            buttons.append([InlineKeyboardButton(
-                text=f"#{post['id']} • {channel_name}",
-                callback_data=f"post_view:{post['id']}"
-            )])
-    
-    buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="posts_menu")])
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
     await callback.answer()
 
@@ -264,7 +288,11 @@ async def callback_posts_drafts(callback: CallbackQuery):
     project_id = user.get("current_project") if user else None
     
     if not project_id:
-        await callback.answer("Нет активного проекта")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="posts_menu")]
+        ])
+        await callback.message.edit_text("❌ Нет активного проекта", reply_markup=keyboard)
+        await callback.answer()
         return
     
     # Получаем черновики
@@ -272,6 +300,10 @@ async def callback_posts_drafts(callback: CallbackQuery):
     
     if not posts:
         text = "📝 **Черновики**\n\n❌ Нет сохраненных черновиков."
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📝 Создать пост", callback_data="menu_create_post_direct")],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="posts_menu")]
+        ])
     else:
         text = "📝 **Черновики**\n\n"
         
@@ -294,19 +326,21 @@ async def callback_posts_drafts(callback: CallbackQuery):
             if date_str:
                 text += f"   📅 {date_str}\n"
             text += f"   {post_text}...\n\n"
+        
+        # Добавляем кнопки для навигации
+        buttons = []
+        if posts:
+            for post in posts[:5]:
+                buttons.append([InlineKeyboardButton(
+                    text=f"#{post['id']} • Открыть",
+                    callback_data=f"post_view:{post['id']}"
+                )])
+        
+        buttons.append([InlineKeyboardButton(text="📝 Создать пост", callback_data="menu_create_post_direct")])
+        buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="posts_menu")])
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     
-    # Добавляем кнопки для навигации
-    buttons = []
-    if posts:
-        for post in posts[:5]:
-            buttons.append([InlineKeyboardButton(
-                text=f"#{post['id']} • Открыть",
-                callback_data=f"post_view:{post['id']}"
-            )])
-    
-    buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="posts_menu")])
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
     await callback.answer()
 
@@ -318,7 +352,11 @@ async def callback_posts_published(callback: CallbackQuery):
     project_id = user.get("current_project") if user else None
     
     if not project_id:
-        await callback.answer("Нет активного проекта")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="posts_menu")]
+        ])
+        await callback.message.edit_text("❌ Нет активного проекта", reply_markup=keyboard)
+        await callback.answer()
         return
     
     # Получаем все посты и фильтруем опубликованные
@@ -328,6 +366,10 @@ async def callback_posts_published(callback: CallbackQuery):
     
     if not posts:
         text = "✅ **Опубликованные посты**\n\n❌ Нет опубликованных постов."
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📝 Создать пост", callback_data="menu_create_post_direct")],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="posts_menu")]
+        ])
     else:
         text = f"✅ **Опубликованные посты**\n\nВсего: {len(posts)}\n\n"
         
@@ -354,9 +396,11 @@ async def callback_posts_published(callback: CallbackQuery):
         
         if len(posts) > 10:
             text += f"_...и еще {len(posts) - 10} постов_"
-    
-    buttons = [[InlineKeyboardButton(text="🔙 Назад", callback_data="posts_menu")]]
-    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+        
+        buttons = []
+        buttons.append([InlineKeyboardButton(text="📝 Создать пост", callback_data="menu_create_post_direct")])
+        buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="posts_menu")])
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
     await callback.answer()
@@ -406,7 +450,7 @@ async def callback_view_post(callback: CallbackQuery):
         info_text += f"**Формат:** {parse_mode_value}\n"
     
     if post.get("repeat_interval") and post["repeat_interval"] > 0:
-        from edit_post_improved import format_interval
+        from edit_post import format_interval
         info_text += f"**Повтор:** каждые {format_interval(post['repeat_interval'])}\n"
     
     # Кнопки управления
