@@ -63,26 +63,14 @@ async def callback_edit_post_global(callback: CallbackQuery):
     """Глобальный обработчик команды редактирования поста"""
     post_id = int(callback.data.split(":", 1)[1])
     
-    # Эмулируем команду /edit через сообщение
-    class FakeMessage:
-        def __init__(self, text, from_user):
-            self.text = text
-            self.from_user = from_user
+    # Отправляем сообщение о запуске редактирования
+    await callback.message.answer(
+        f"✏️ **Запуск редактирования поста #{post_id}**\n\n"
+        f"Используйте команду `/edit {post_id}` для редактирования поста.",
+        parse_mode="Markdown"
+    )
     
-    fake_message = FakeMessage(f"/edit {post_id}", callback.from_user)
-    
-    # Создаем пустое состояние FSM
-    from aiogram.fsm.context import FSMContext
-    from aiogram.fsm.storage.memory import MemoryStorage
-    
-    storage = MemoryStorage()
-    state = FSMContext(storage=storage, key=f"user:{callback.from_user.id}")
-    
-    # Вызываем команду редактирования
-    from edit_post import cmd_edit
-    await cmd_edit(fake_message, state)
-    
-    await callback.answer("Запущено редактирование поста")
+    await callback.answer("Используйте команду /edit " + str(post_id))
 
 @dp.callback_query(F.data.startswith("post_publish_cmd:"))
 async def callback_publish_post_global(callback: CallbackQuery):
@@ -272,26 +260,12 @@ async def callback_full_view_post_global(callback: CallbackQuery):
 @dp.callback_query(F.data == "menu_create_post_direct")
 async def callback_create_post_direct(callback: CallbackQuery):
     """Прямое создание поста через callback из меню"""
-    # Эмулируем команду /create через сообщение
-    class FakeMessage:
-        def __init__(self, text, from_user):
-            self.text = text
-            self.from_user = from_user
-    
-    fake_message = FakeMessage("/create", callback.from_user)
-    
-    # Создаем пустое состояние FSM
-    from aiogram.fsm.context import FSMContext
-    from aiogram.fsm.storage.memory import MemoryStorage
-    
-    storage = MemoryStorage()
-    state = FSMContext(storage=storage, key=f"user:{callback.from_user.id}")
-    
-    # Вызываем команду создания
-    from scheduled_posts_fixed import cmd_create_post
-    await cmd_create_post(fake_message, state)
-    
-    await callback.answer("Запущено создание поста")
+    await callback.message.answer(
+        "📝 **Создание нового поста**\n\n"
+        "Используйте команду `/create` для создания поста.",
+        parse_mode="Markdown"
+    )
+    await callback.answer("Используйте команду /create")
 
 # Обработчик для меню постов
 @dp.callback_query(F.data == "posts_menu")
