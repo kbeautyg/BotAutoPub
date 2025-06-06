@@ -30,7 +30,7 @@ import help
 import projects
 
 # Основные функциональные модули
-import main_menu
+import main_menu as main_menu  # Используем исправленную версию
 import channels
 import scheduled_posts as create  # Используем исправленную версию
 import list_posts  # Импортируем list_posts для работы со списками
