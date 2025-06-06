@@ -17,6 +17,7 @@ async def cmd_project(message: Message, bot: Bot, state: FSMContext):
     user = supabase_db.db.get_user(user_id)
     if user:
         lang = user.get("language", "ru")
+    
     # If no subcommand, list projects and provide inline switch/create
     if len(args) == 1:
         if not user:
@@ -24,8 +25,19 @@ async def cmd_project(message: Message, bot: Bot, state: FSMContext):
             return
         projects = supabase_db.db.list_projects(user_id)
         if not projects:
-            await message.answer(TEXTS[lang]['projects_not_found'])
+            # Нет проектов - предлагаем создать
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📁 Создать проект", callback_data="proj_new")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ])
+            await message.answer(
+                "📁 **Управление проектами**\n\n"
+                "У вас пока нет проектов. Создайте первый проект для начала работы!",
+                reply_markup=keyboard,
+                parse_mode="Markdown"
+            )
             return
+        
         lines = [TEXTS[lang]['projects_list_title']]
         current_proj = user.get("current_project")
         for proj in projects:
@@ -34,6 +46,7 @@ async def cmd_project(message: Message, bot: Bot, state: FSMContext):
                 lines.append(TEXTS[lang]['projects_item_current'].format(name=name))
             else:
                 lines.append(TEXTS[lang]['projects_item'].format(name=name))
+        
         # Build inline keyboard with each project and a New Project button
         buttons = []
         for proj in projects:
@@ -50,9 +63,19 @@ async def cmd_project(message: Message, bot: Bot, state: FSMContext):
     if sub in ("new", "create"):
         # Create a new project with given name
         if len(args) < 3:
-            # No name provided, prompt usage or start FSM
-            await message.answer(TEXTS[lang]['projects_invite_usage'] if sub == "invite" else "Please provide a project name.")
+            # No name provided, start FSM
+            await state.set_state(NewProject.name)
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="❌ Отменить", callback_data="proj_new_cancel")]
+            ])
+            await message.answer(
+                "📁 **Создание нового проекта**\n\n"
+                "Введите название нового проекта:",
+                reply_markup=keyboard,
+                parse_mode="Markdown"
+            )
             return
+        
         proj_name = args[2].strip()
         if not proj_name:
             await message.answer("Название проекта не может быть пустым." if lang == "ru" else "Project name cannot be empty.")
@@ -148,37 +171,209 @@ async def on_switch_project(callback: CallbackQuery):
         return
     # Update current project
     supabase_db.db.update_user(user_id, {"current_project": proj_id})
-    # Edit any message (if listing) to reflect switch
+    
+    # Возвращаем обновленное меню проектов
     try:
-        await callback.message.edit_text(TEXTS[lang]['projects_switched'].format(name=project.get("name", "")))
-    except:
+        projects = supabase_db.db.list_projects(user_id)
+        text = "📁 **Ваши проекты:**\n\n"
+        current_proj = proj_id  # Только что переключились
+        
+        buttons = []
+        for proj in projects:
+            name = proj.get("name", "Unnamed")
+            is_current = proj["id"] == current_proj
+            
+            if is_current:
+                text += f"• **{name}** ✅ (текущий)\n"
+            else:
+                text += f"• {name}\n"
+            
+            button_text = f"{name}" + (" ✅" if is_current else "")
+            buttons.append([InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"proj_switch:{proj['id']}"
+            )])
+        
+        buttons.append([InlineKeyboardButton(text="➕ Новый проект", callback_data="proj_new")])
+        buttons.append([InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")])
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+        
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+        await callback.answer(f"✅ Переключен на проект '{project.get('name', '')}'")
+    except Exception as e:
+        print(f"Error updating project menu: {e}")
         await callback.answer(TEXTS[lang]['projects_switched'].format(name=project.get("name", "")), show_alert=True)
-    await callback.answer()
 
 @router.callback_query(F.data == "proj_new")
 async def on_new_project(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
     user = supabase_db.db.get_user(user_id)
+    if not user:
+        user = supabase_db.db.ensure_user(user_id)
     lang = user.get("language", "ru") if user else "ru"
-    await callback.message.answer("Введите название нового проекта:" if lang == "ru" else "Please send the new project name:")
+    
+    # Устанавливаем состояние для создания проекта
     await state.set_state(NewProject.name)
+    
+    # Клавиатура для отмены
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отменить", callback_data="proj_new_cancel")]
+    ])
+    
+    await callback.message.edit_text(
+        "📁 **Создание нового проекта**\n\n"
+        "Введите название нового проекта:\n\n"
+        "💡 Примеры: \"Мой блог\", \"Компания ABC\", \"Личные проекты\"",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
     await callback.answer()
 
-@router.message(NewProject.name)
+@router.callback_query(F.data == "proj_new_cancel")
+async def on_new_project_cancel(callback: CallbackQuery, state: FSMContext):
+    """Отмена создания проекта"""
+    await state.clear()
+    
+    # Возвращаемся к меню проектов
+    user_id = callback.from_user.id
+    user = supabase_db.db.get_user(user_id)
+    
+    try:
+        projects = supabase_db.db.list_projects(user_id)
+        
+        if not projects:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📁 Создать проект", callback_data="proj_new")],
+                [InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]
+            ])
+            await callback.message.edit_text(
+                "📁 **Управление проектами**\n\n"
+                "У вас пока нет проектов. Создайте первый проект для начала работы!",
+                reply_markup=keyboard,
+                parse_mode="Markdown"
+            )
+        else:
+            # Показываем существующие проекты
+            text = "📁 **Ваши проекты:**\n\n"
+            current_proj = user.get("current_project")
+            
+            buttons = []
+            for proj in projects:
+                name = proj.get("name", "Unnamed")
+                is_current = current_proj and proj["id"] == current_proj
+                
+                if is_current:
+                    text += f"• **{name}** ✅ (текущий)\n"
+                else:
+                    text += f"• {name}\n"
+                
+                button_text = f"{name}" + (" ✅" if is_current else "")
+                buttons.append([InlineKeyboardButton(
+                    text=button_text,
+                    callback_data=f"proj_switch:{proj['id']}"
+                )])
+            
+            buttons.append([InlineKeyboardButton(text="➕ Новый проект", callback_data="proj_new")])
+            buttons.append([InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")])
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+            await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+    
+    except Exception as e:
+        print(f"Error in project cancel: {e}")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]
+        ])
+        await callback.message.edit_text(
+            "❌ Создание проекта отменено",
+            reply_markup=keyboard
+        )
+    
+    await callback.answer("Создание проекта отменено")
+
+@router.message(NewProject.name, F.text)
 async def create_new_project_name(message: Message, state: FSMContext):
     user_id = message.from_user.id
     project_name = message.text.strip()
     user = supabase_db.db.get_user(user_id)
     lang = user.get("language", "ru") if user else "ru"
-    if not project_name:
-        await message.answer("Название проекта не может быть пустым." if lang == "ru" else "Project name cannot be empty.")
-        return
-    project = supabase_db.db.create_project(user_id, project_name)
-    if not project:
-        await message.answer("Ошибка при создании проекта." if lang == "ru" else "Failed to create project.")
+    
+    # Проверка на команды отмены
+    if project_name.lower() in ['/cancel', 'отмена', 'cancel']:
         await state.clear()
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer("❌ Создание проекта отменено", reply_markup=keyboard)
         return
-    # Set new project as current
-    supabase_db.db.update_user(user_id, {"current_project": project["id"]})
-    await message.answer(TEXTS[lang]['projects_created'].format(name=project_name))
-    await state.clear()
+    
+    if not project_name:
+        await message.answer(
+            "❌ Название проекта не может быть пустым.\n\n"
+            "Введите название проекта или отправьте /cancel для отмены:",
+            parse_mode="Markdown"
+        )
+        return
+    
+    # Проверка длины названия
+    if len(project_name) > 50:
+        await message.answer(
+            "❌ Название проекта слишком длинное (максимум 50 символов).\n\n"
+            "Введите более короткое название:",
+            parse_mode="Markdown"
+        )
+        return
+    
+    # Создаем проект
+    try:
+        project = supabase_db.db.create_project(user_id, project_name)
+        if not project:
+            await message.answer("❌ Ошибка при создании проекта. Попробуйте еще раз.")
+            await state.clear()
+            return
+        
+        # Set new project as current
+        supabase_db.db.update_user(user_id, {"current_project": project["id"]})
+        
+        # Показываем успешное создание с меню действий
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📺 Добавить канал", callback_data="channels_add")],
+            [InlineKeyboardButton(text="📝 Создать пост", callback_data="menu_create_post")],
+            [InlineKeyboardButton(text="📁 Управление проектами", callback_data="menu_projects")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        
+        await message.answer(
+            f"✅ **Проект создан!**\n\n"
+            f"Проект **'{project_name}'** успешно создан и активирован.\n\n"
+            f"**Следующие шаги:**\n"
+            f"• Добавьте каналы для публикации\n"
+            f"• Создайте первый пост\n"
+            f"• Настройте автоматизацию\n\n"
+            f"Что хотите сделать дальше?",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+        
+        await state.clear()
+        
+    except Exception as e:
+        print(f"Error creating project: {e}")
+        await message.answer(
+            "❌ **Ошибка при создании проекта**\n\n"
+            "Попробуйте еще раз или обратитесь к администратору.",
+            parse_mode="Markdown"
+        )
+        await state.clear()
+
+# Дополнительные обработчики для совместимости с другими модулями
+@router.message(NewProject.name)
+async def handle_non_text_project_name(message: Message, state: FSMContext):
+    """Обработка нетекстовых сообщений при создании проекта"""
+    await message.answer(
+        "❌ **Некорректный ввод**\n\n"
+        "Пожалуйста, введите название проекта текстом.\n\n"
+        "Или отправьте /cancel для отмены.",
+        parse_mode="Markdown"
+    )
