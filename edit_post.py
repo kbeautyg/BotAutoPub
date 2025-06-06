@@ -611,6 +611,8 @@ async def edit_channel_field(callback: CallbackQuery, state: FSMContext, post: d
     
     if not channels:
         await callback.message.edit_text("❌ Нет доступных каналов для переноса")
+        await callback.answer()
+        return
     
     text = (
         f"📺 **Редактирование канала поста #{post['id']}**\n\n"
@@ -645,7 +647,23 @@ async def edit_channel_field(callback: CallbackQuery, state: FSMContext, post: d
     buttons.append([InlineKeyboardButton(text="🔙 В меню", callback_data=f"edit_menu:{post['id']}")])
     buttons.append([InlineKeyboardButton(text="❌ Отменить", callback_data=f"edit_cancel:{post['id']}")])
     
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
 
+@router.callback_query(F.data.startswith("edit_channel_set:"))
+async def handle_channel_set(callback: CallbackQuery, state: FSMContext):
+    """Установка канала"""
+    parts = callback.data.split(":")
+    post_id = int(parts[1])
+    channel_id = int(parts[2])
+    
+    # Получаем канал для получения chat_id
+    channel = supabase_db.db.get_channel(channel_id)
+    channel_data = {"channel_id": channel_id}
+    if channel:
+        channel_data["chat_id"] = channel.get("chat_id")
+    
+    await finish_field_edit_callback(callback, state, post_id, "channel", channel_data)
 
 @router.message(EditPost.channel, F.text)
 async def handle_channel_edit_text_input(message: Message, state: FSMContext):
@@ -699,79 +717,7 @@ async def handle_channel_edit_text_input(message: Message, state: FSMContext):
     if channel:
         channel_data["chat_id"] = channel.get("chat_id")
     
-
-
-# Глобальные обработчики для совместимости с main.py
-async def handle_edit_field_callback(callback: CallbackQuery, state: FSMContext):
-    """Глобальный обработчик редактирования полей (для main.py)"""
-    await handle_single_field_edit(callback, state)
-
-async def handle_edit_confirm_callback(callback: CallbackQuery, state: FSMContext):
-    """Глобальный обработчик подтверждения (для main.py)"""
-    await handle_edit_save(callback, state)
-
-# Экспортируемые функции для других модулей
-__all__ = [
-    'show_edit_main_menu',
-    'handle_edit_field_callback', 
-    'handle_edit_confirm_callback',
-    'handle_edit_menu_return',
-    'handle_edit_skip',
-    'handle_edit_save',
-    'handle_edit_cancel',
-    'handle_edit_recreate'
-]
-    
-    text = (
-        f"📺 **Редактирование канала поста #{post['id']}**\n\n"
-        f"**Текущий канал:** {current_channel_name}\n\n"
-        f"**Выберите новый канал:**\n\n"
-    )
-    
-    # Список каналов с номерами
-    for i, channel in enumerate(channels, 1):
-        admin_status = "✅" if channel.get('is_admin_verified') else "❓"
-        text += f"{i}. {admin_status} {channel['name']}\n"
-    
-    text += (
-        f"\nТекстовые команды:\n"
-        f"• Номер канала (например: `1`)\n"
-        f"• @username канала\n"
-        f"• `skip` - оставить текущий канал\n"
-        f"• `cancel` - отменить редактирование"
-    )
-    
-    # Создаем кнопки для каналов
-    buttons = []
-    for i, channel in enumerate(channels):
-        admin_status = "✅" if channel.get('is_admin_verified') else "❓"
-        button_text = f"{admin_status} {channel['name']}"
-        buttons.append([InlineKeyboardButton(
-            text=button_text, 
-            callback_data=f"edit_channel_set:{post['id']}:{channel['id']}"
-        )])
-    
-    buttons.append([InlineKeyboardButton(text="⏭️ Пропустить", callback_data=f"edit_skip:{post['id']}:channel")])
-    buttons.append([InlineKeyboardButton(text="🔙 В меню", callback_data=f"edit_menu:{post['id']}")])
-    buttons.append([InlineKeyboardButton(text="❌ Отменить", callback_data=f"edit_cancel:{post['id']}")])
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
-
-@router.callback_query(F.data.startswith("edit_channel_set:"))
-async def handle_channel_set(callback: CallbackQuery, state: FSMContext):
-    """Установка канала"""
-    parts = callback.data.split(":")
-    post_id = int(parts[1])
-    channel_id = int(parts[2])
-    
-    # Получаем канал для получения chat_id
-    channel = supabase_db.db.get_channel(channel_id)
-    channel_data = {"channel_id": channel_id}
-    if channel:
-        channel_data["chat_id"] = channel.get("chat_id")
-    
-    await finish_field_edit_callback(callback, state, post_id, "channel", channel_data)
+    await finish_field_edit(message, state, post_id, "channel", channel_data)
 
 # Обработчики предпросмотра и завершения редактирования
 @router.callback_query(F.data.startswith("edit_preview:"))
@@ -1042,3 +988,24 @@ async def cancel_edit(message: Message, state: FSMContext, post_id: int):
         parse_mode="Markdown",
         reply_markup=keyboard
     )
+
+# Глобальные обработчики для совместимости с main.py
+async def handle_edit_field_callback(callback: CallbackQuery, state: FSMContext):
+    """Глобальный обработчик редактирования полей (для main.py)"""
+    await handle_single_field_edit(callback, state)
+
+async def handle_edit_confirm_callback(callback: CallbackQuery, state: FSMContext):
+    """Глобальный обработчик подтверждения (для main.py)"""
+    await handle_edit_save(callback, state)
+
+# Экспортируемые функции для других модулей
+__all__ = [
+    'show_edit_main_menu',
+    'handle_edit_field_callback', 
+    'handle_edit_confirm_callback',
+    'handle_edit_menu_return',
+    'handle_edit_skip',
+    'handle_edit_save',
+    'handle_edit_cancel',
+    'handle_edit_recreate'
+]
