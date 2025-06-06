@@ -112,14 +112,27 @@ async def callback_main_menu(callback: CallbackQuery):
 @router.callback_query(F.data == "menu_create_post")
 async def callback_create_post(callback: CallbackQuery):
     """Создать пост"""
-    await callback.message.answer("Используйте команду /create для создания нового поста.")
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]
+    ])
+    
+    await callback.message.edit_text(
+        "📝 **Создание нового поста**\n\n"
+        "Используйте команду `/create` для создания поста с пошаговым мастером.\n\n"
+        "**Быстрое создание:**\n"
+        "• `/quickpost @канал now Текст поста` - опубликовать сейчас\n"
+        "• `/quickpost 1 draft Черновик` - сохранить черновик\n"
+        "• `/quickpost 2 2024-12-25_15:30 Запланированный пост`",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
     await callback.answer()
 
 @router.callback_query(F.data == "menu_posts")
 async def callback_posts_menu(callback: CallbackQuery):
     """Меню постов"""
-    # Импортируем функцию из scheduled_posts
-    from scheduled_posts import callback_posts_menu as posts_menu_handler
+    # Импортируем функцию из list_posts
+    from list_posts import callback_posts_menu as posts_menu_handler
     await posts_menu_handler(callback)
 
 @router.callback_query(F.data == "menu_channels")
@@ -132,7 +145,21 @@ async def callback_channels_menu(callback: CallbackQuery):
 @router.callback_query(F.data == "menu_projects")
 async def callback_projects_menu(callback: CallbackQuery):
     """Меню проектов"""
-    await callback.message.answer("Используйте команду /project для управления проектами.")
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]
+    ])
+    
+    await callback.message.edit_text(
+        "📁 **Управление проектами**\n\n"
+        "Используйте команду `/project` для управления проектами.\n\n"
+        "**Команды:**\n"
+        "• `/project` - список проектов\n"
+        "• `/project new <название>` - создать проект\n"
+        "• `/project switch <ID>` - переключить проект\n"
+        "• `/project invite <user_id>` - пригласить пользователя",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
     await callback.answer()
 
 @router.callback_query(F.data == "menu_settings")
@@ -145,7 +172,25 @@ async def callback_settings_menu(callback: CallbackQuery):
 @router.callback_query(F.data == "menu_help")
 async def callback_help_menu(callback: CallbackQuery):
     """Меню помощи"""
-    await callback.message.answer("Используйте команду /help для получения справки.")
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]
+    ])
+    
+    await callback.message.edit_text(
+        "❓ **Справка по боту**\n\n"
+        "Используйте команду `/help` для получения полной справки.\n\n"
+        "**Основные команды:**\n"
+        "• `/create` - создать пост\n"
+        "• `/list` - список постов\n"
+        "• `/channels` - управление каналами\n"
+        "• `/settings` - настройки\n\n"
+        "**Быстрые команды:**\n"
+        "• `/quickpost` - быстрое создание\n"
+        "• `/edit <ID>` - редактировать пост\n"
+        "• `/view <ID>` - просмотр поста",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
     await callback.answer()
 
 # Команды быстрого доступа
@@ -171,8 +216,13 @@ async def callback_quick_post(callback: CallbackQuery):
     """Быстрое создание поста"""
     await callback.message.answer(
         "🚀 **Быстрое создание поста**\n\n"
-        "Отправьте текст поста, и он будет опубликован в первом доступном канале через 5 минут.\n\n"
-        "Или используйте /create для полного контроля над постом.",
+        "Используйте команду `/quickpost` для быстрого создания:\n\n"
+        "**Формат:** `/quickpost <канал> <время> <текст>`\n\n"
+        "**Примеры:**\n"
+        "• `/quickpost @channel now Текст поста`\n"
+        "• `/quickpost 1 draft Черновик поста`\n"
+        "• `/quickpost 2 2024-12-25_15:30 Запланированный пост`\n\n"
+        "Или используйте `/create` для полного контроля над постом.",
         parse_mode="Markdown"
     )
     await callback.answer()
