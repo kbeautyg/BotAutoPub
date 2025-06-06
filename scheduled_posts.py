@@ -403,6 +403,171 @@ async def start_media_step(message: Message, state: FSMContext, lang: str):
     keyboard = get_navigation_keyboard("step_media", lang, can_skip=True)
     await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
 
+# Добавляем обработчик для предложения редактирования в scheduled_posts.py
+@router.callback_query(F.data.startswith("edit_offer_"))
+async def handle_edit_offer_response(callback: CallbackQuery, state: FSMContext):
+    """Обработка ответа на предложение редактирования"""
+    action = callback.data.split("_")[-1]  # accept или decline
+    
+    # Извлекаем post_id из callback_data предыдущего сообщения
+    try:
+        # Ищем post_id в тексте сообщения
+        message_text = callback.message.text
+        import re
+        post_id_match = re.search(r'#(\d+)', message_text)
+        if post_id_match:
+            post_id = int(post_id_match.group(1))
+        else:
+            await callback.answer("❌ Не удалось определить ID поста")
+            return
+    except:
+        await callback.answer("❌ Ошибка обработки")
+        return
+    
+    if action == "accept":
+        # Пользователь хочет редактировать пост
+        user_id = callback.from_user.id
+        user = supabase_db.db.get_user(user_id)
+        
+        # Получаем пост
+        post = supabase_db.db.get_post(post_id)
+        if not post or not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
+            await callback.answer("❌ Пост не найден или нет доступа!")
+            return
+        
+        if post.get("published"):
+            await callback.answer("❌ Нельзя редактировать опубликованный пост!")
+            return
+        
+        # Показываем главное меню редактирования
+        try:
+            from edit_post_improved import show_edit_main_menu
+            await show_edit_main_menu(callback.message, post_id, post, user, user.get("language", "ru"))
+            await callback.answer()
+        except ImportError:
+            # Fallback на старый метод
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_direct:{post_id}")],
+                [InlineKeyboardButton(text="👀 Просмотр", callback_data=f"post_full_view:{post_id}")],
+                [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")]
+            ])
+            
+            await callback.message.edit_text(
+                f"✏️ **Редактирование поста #{post_id}**\n\n"
+                f"Выберите действие:",
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+            await callback.answer()
+    
+    elif action == "decline":
+        # Пользователь не хочет редактировать
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_full_view:{post_id}")],
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        
+        await callback.message.edit_text(
+            f"✅ **Отлично!**\n\n"
+            f"Пост #{post_id} готов к публикации в запланированное время.",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+        await callback.answer()
+
+# Обновляем функцию get_edit_offer_keyboard
+def get_edit_offer_keyboard(post_id: int, lang: str = "ru"):
+    """Клавиатура предложения редактирования для запланированного поста"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✏️ Да, редактировать", callback_data=f"edit_offer_accept"),
+            InlineKeyboardButton(text="✅ Нет, всё хорошо", callback_data="edit_offer_decline")
+        ]
+    ])
+
+# Также добавляем новые обработчики в основной файл scheduled_posts.py для лучшей интеграции
+@router.callback_query(F.data == "edit_offer_accept")
+async def handle_edit_offer_accept(callback: CallbackQuery, state: FSMContext):
+    """Принятие предложения редактирования"""
+    # Извлекаем post_id из текста сообщения
+    try:
+        message_text = callback.message.text
+        import re
+        post_id_match = re.search(r'#(\d+)', message_text)
+        if post_id_match:
+            post_id = int(post_id_match.group(1))
+        else:
+            await callback.answer("❌ Не удалось определить ID поста")
+            return
+    except:
+        await callback.answer("❌ Ошибка обработки")
+        return
+    
+    user_id = callback.from_user.id
+    user = supabase_db.db.get_user(user_id)
+    
+    # Получаем пост
+    post = supabase_db.db.get_post(post_id)
+    if not post or not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
+        await callback.answer("❌ Пост не найден или нет доступа!")
+        return
+    
+    if post.get("published"):
+        await callback.answer("❌ Нельзя редактировать опубликованный пост!")
+        return
+    
+    # Показываем главное меню редактирования из нового модуля
+    try:
+        # Импортируем функцию из нового модуля редактирования
+        from edit_post_improved import show_edit_main_menu
+        await show_edit_main_menu(callback.message, post_id, post, user, user.get("language", "ru"))
+        await callback.answer()
+    except ImportError:
+        # Fallback если новый модуль недоступен
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_direct:{post_id}")],
+            [InlineKeyboardButton(text="👀 Просмотр", callback_data=f"post_full_view:{post_id}")],
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")]
+        ])
+        
+        await callback.message.edit_text(
+            f"✏️ **Редактирование поста #{post_id}**\n\n"
+            f"Используйте команду `/edit {post_id}` для редактирования.",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+        await callback.answer("Используйте команду /edit " + str(post_id))
+
+@router.callback_query(F.data == "edit_offer_decline")
+async def handle_edit_offer_decline(callback: CallbackQuery):
+    """Отклонение предложения редактирования"""
+    # Извлекаем post_id из текста сообщения
+    try:
+        message_text = callback.message.text
+        import re
+        post_id_match = re.search(r'#(\d+)', message_text)
+        if post_id_match:
+            post_id = int(post_id_match.group(1))
+        else:
+            post_id = 0
+    except:
+        post_id = 0
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_full_view:{post_id}" if post_id else "posts_menu")],
+        [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
+    
+    await callback.message.edit_text(
+        "✅ **Отлично!**\n\n"
+        "Пост готов к публикации в запланированное время.",
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
 @router.message(PostCreationFlow.step_media, F.text | F.photo | F.video | F.animation)
 async def handle_media_input(message: Message, state: FSMContext):
     """Обработка медиа или команд"""
