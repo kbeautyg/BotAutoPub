@@ -59,7 +59,7 @@ def get_post_management_keyboard(post_id: int, is_published: bool = False) -> In
     
     if not is_published:
         buttons.append([
-            InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_cmd:{post_id}"),
+            InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_direct:{post_id}"),
             InlineKeyboardButton(text="🚀 Опубликовать", callback_data=f"post_publish_cmd:{post_id}")
         ])
         buttons.append([
@@ -83,29 +83,46 @@ async def cmd_view_post(message: Message):
     
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
         await message.answer(
             "❌ **Использование команды**\n\n"
             "`/view <ID поста>`\n\n"
             "Пример: `/view 123`",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=keyboard
         )
         return
     
     try:
         post_id = int(args[1])
     except ValueError:
-        await message.answer("❌ ID поста должен быть числом")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer("❌ ID поста должен быть числом", reply_markup=keyboard)
         return
     
     # Получаем пост
     post = supabase_db.db.get_post(post_id)
     if not post:
-        await message.answer(f"❌ Пост #{post_id} не найден")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer(f"❌ Пост #{post_id} не найден", reply_markup=keyboard)
         return
     
     # Проверяем доступ
     if not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
-        await message.answer("❌ У вас нет доступа к этому посту")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer("❌ У вас нет доступа к этому посту", reply_markup=keyboard)
         return
     
     # Получаем информацию о канале
@@ -206,11 +223,16 @@ async def send_post_preview(message: Message, post: dict, channel: dict = None):
                 reply_markup=markup
             )
     except Exception as e:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
         await message.answer(
             f"⚠️ **Ошибка предпросмотра**\n\n"
             f"Не удалось показать превью: {str(e)}\n\n"
             f"Проверьте форматирование текста.",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=keyboard
         )
 
 def format_interval(seconds: int) -> str:
@@ -234,33 +256,54 @@ async def cmd_publish_now(message: Message):
     
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
         await message.answer(
             "❌ **Использование команды**\n\n"
             "`/publish <ID поста>`\n\n"
             "Пример: `/publish 123`",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=keyboard
         )
         return
     
     try:
         post_id = int(args[1])
     except ValueError:
-        await message.answer("❌ ID поста должен быть числом")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer("❌ ID поста должен быть числом", reply_markup=keyboard)
         return
     
     # Получаем пост
     post = supabase_db.db.get_post(post_id)
     if not post:
-        await message.answer(f"❌ Пост #{post_id} не найден")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer(f"❌ Пост #{post_id} не найден", reply_markup=keyboard)
         return
     
     # Проверяем доступ
     if not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
-        await message.answer("❌ У вас нет доступа к этому посту")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer("❌ У вас нет доступа к этому посту", reply_markup=keyboard)
         return
     
     if post.get("published"):
-        await message.answer("❌ Пост уже опубликован")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_full_view:{post_id}")],
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")]
+        ])
+        await message.answer("❌ Пост уже опубликован", reply_markup=keyboard)
         return
     
     # Обновляем время публикации на текущее
@@ -271,7 +314,7 @@ async def cmd_publish_now(message: Message):
     })
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_view:{post_id}")],
+        [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_full_view:{post_id}")],
         [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
@@ -292,11 +335,16 @@ async def cmd_reschedule_post(message: Message):
     
     parts = message.text.split(maxsplit=3)
     if len(parts) < 4:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
         await message.answer(
             "❌ **Использование команды**\n\n"
             "`/reschedule <ID> <YYYY-MM-DD> <HH:MM>`\n\n"
             "Пример: `/reschedule 123 2024-12-25 15:30`",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=keyboard
         )
         return
     
@@ -305,22 +353,38 @@ async def cmd_reschedule_post(message: Message):
         date_str = parts[2]
         time_str = parts[3]
     except (ValueError, IndexError):
-        await message.answer("❌ Неверный формат команды")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer("❌ Неверный формат команды", reply_markup=keyboard)
         return
     
     # Получаем пост
     post = supabase_db.db.get_post(post_id)
     if not post:
-        await message.answer(f"❌ Пост #{post_id} не найден")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer(f"❌ Пост #{post_id} не найден", reply_markup=keyboard)
         return
     
     # Проверяем доступ
     if not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
-        await message.answer("❌ У вас нет доступа к этому посту")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer("❌ У вас нет доступа к этому посту", reply_markup=keyboard)
         return
     
     if post.get("published"):
-        await message.answer("❌ Нельзя перенести уже опубликованный пост")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_full_view:{post_id}")],
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")]
+        ])
+        await message.answer("❌ Нельзя перенести уже опубликованный пост", reply_markup=keyboard)
         return
     
     # Парсим новое время
@@ -332,7 +396,11 @@ async def cmd_reschedule_post(message: Message):
         
         # Проверяем, что время в будущем
         if utc_dt <= datetime.now(ZoneInfo("UTC")):
-            await message.answer("❌ Время должно быть в будущем")
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_full_view:{post_id}")],
+                [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")]
+            ])
+            await message.answer("❌ Время должно быть в будущем", reply_markup=keyboard)
             return
         
         # Обновляем пост
@@ -343,7 +411,7 @@ async def cmd_reschedule_post(message: Message):
         })
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_view:{post_id}")],
+            [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_full_view:{post_id}")],
             [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
         ])
@@ -356,9 +424,14 @@ async def cmd_reschedule_post(message: Message):
         )
         
     except ValueError as e:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
         await message.answer(
             f"❌ **Ошибка формата времени**\n\n"
             f"Используйте формат: YYYY-MM-DD HH:MM\n"
             f"Ошибка: {str(e)}",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=keyboard
         )
