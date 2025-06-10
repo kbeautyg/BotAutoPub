@@ -137,7 +137,7 @@ def get_edit_offer_keyboard(post_id: int, lang: str = "ru"):
     """Клавиатура предложения редактирования для запланированного поста"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✏️ Да, редактировать", callback_data=f"post_edit_direct:{post_id}"),
+            InlineKeyboardButton(text="✏️ Да, редактировать", callback_data=f"edit_offer_accept"),
             InlineKeyboardButton(text="✅ Нет, всё хорошо", callback_data="edit_offer_decline")
         ]
     ])
@@ -167,21 +167,8 @@ async def cmd_create_post(message: Message, state: FSMContext):
     user = supabase_db.db.ensure_user(user_id)
     lang = user.get("language", "ru") if user else "ru"
     
-    # Проверяем наличие проекта
-    project_id = user.get("current_project")
-    if not project_id:
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📁 Создать проект", callback_data="proj_new")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-        ])
-        await message.answer(
-            "❌ Нет активного проекта. Создайте проект через /project",
-            reply_markup=keyboard
-        )
-        return
-    
-    # Проверяем наличие каналов
-    channels = supabase_db.db.list_channels(project_id=project_id)
+    # Проверяем наличие каналов у пользователя
+    channels = supabase_db.db.get_user_channels(user_id)
     if not channels:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📺 Добавить канал", callback_data="channels_add")],
@@ -198,7 +185,6 @@ async def cmd_create_post(message: Message, state: FSMContext):
     # Инициализируем данные поста
     await state.set_data({
         "user_id": user_id,
-        "project_id": project_id,
         "text": None,
         "media_type": None,
         "media_file_id": None,
@@ -220,14 +206,15 @@ async def cmd_quick_post(message: Message, state: FSMContext):
     """Быстрое создание поста: /quickpost <канал> <время> <текст>"""
     user_id = message.from_user.id
     user = supabase_db.db.ensure_user(user_id)
-    project_id = user.get("current_project")
     
-    if not project_id:
+    # Получаем каналы пользователя
+    channels = supabase_db.db.get_user_channels(user_id)
+    if not channels:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📁 Создать проект", callback_data="proj_new")],
+            [InlineKeyboardButton(text="📺 Добавить канал", callback_data="channels_add")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
         ])
-        await message.answer("❌ Нет активного проекта", reply_markup=keyboard)
+        await message.answer("❌ У вас нет доступных каналов", reply_markup=keyboard)
         return
     
     # Парсим аргументы
@@ -255,8 +242,7 @@ async def cmd_quick_post(message: Message, state: FSMContext):
     time_ref = parts[2]
     text = parts[3]
     
-    # Находим канал
-    channels = supabase_db.db.list_channels(project_id=project_id)
+    # Находим канал среди каналов пользователя
     channel = None
     
     if channel_ref.isdigit():
@@ -276,7 +262,7 @@ async def cmd_quick_post(message: Message, state: FSMContext):
             [InlineKeyboardButton(text="📺 Управление каналами", callback_data="channels_menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
         ])
-        await message.answer(f"❌ Канал '{channel_ref}' не найден", reply_markup=keyboard)
+        await message.answer(f"❌ Канал '{channel_ref}' не найден среди ваших каналов", reply_markup=keyboard)
         return
     
     # Парсим время
@@ -306,9 +292,9 @@ async def cmd_quick_post(message: Message, state: FSMContext):
     
     # Создаем пост
     post_data = {
-        "user_id": user_id,
-        "project_id": project_id,
         "channel_id": channel['id'],
+        "chat_id": channel['chat_id'],
+        "created_by": user_id,
         "text": text,
         "parse_mode": "HTML",
         "publish_time": publish_time.isoformat() if publish_time else None,
@@ -431,8 +417,13 @@ async def handle_edit_offer_response(callback: CallbackQuery, state: FSMContext)
         
         # Получаем пост
         post = supabase_db.db.get_post(post_id)
-        if not post or not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
-            await callback.answer("❌ Пост не найден или нет доступа!")
+        if not post:
+            await callback.answer("❌ Пост не найден!")
+            return
+        
+        # Проверяем доступ через канал
+        if not supabase_db.db.is_channel_admin(post.get("channel_id"), user_id):
+            await callback.answer("❌ У вас нет доступа к этому посту!")
             return
         
         if post.get("published"):
@@ -441,7 +432,7 @@ async def handle_edit_offer_response(callback: CallbackQuery, state: FSMContext)
         
         # Показываем главное меню редактирования
         try:
-            from edit_post_improved import show_edit_main_menu
+            from edit_post import show_edit_main_menu
             await show_edit_main_menu(callback.message, post_id, post, user, user.get("language", "ru"))
             await callback.answer()
         except ImportError:
@@ -476,17 +467,6 @@ async def handle_edit_offer_response(callback: CallbackQuery, state: FSMContext)
         )
         await callback.answer()
 
-# Обновляем функцию get_edit_offer_keyboard
-def get_edit_offer_keyboard(post_id: int, lang: str = "ru"):
-    """Клавиатура предложения редактирования для запланированного поста"""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✏️ Да, редактировать", callback_data=f"edit_offer_accept"),
-            InlineKeyboardButton(text="✅ Нет, всё хорошо", callback_data="edit_offer_decline")
-        ]
-    ])
-
-# Также добавляем новые обработчики в основной файл scheduled_posts.py для лучшей интеграции
 @router.callback_query(F.data == "edit_offer_accept")
 async def handle_edit_offer_accept(callback: CallbackQuery, state: FSMContext):
     """Принятие предложения редактирования"""
@@ -509,8 +489,13 @@ async def handle_edit_offer_accept(callback: CallbackQuery, state: FSMContext):
     
     # Получаем пост
     post = supabase_db.db.get_post(post_id)
-    if not post or not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
-        await callback.answer("❌ Пост не найден или нет доступа!")
+    if not post:
+        await callback.answer("❌ Пост не найден!")
+        return
+    
+    # Проверяем доступ через канал
+    if not supabase_db.db.is_channel_admin(post.get("channel_id"), user_id):
+        await callback.answer("❌ У вас нет доступа к этому посту!")
         return
     
     if post.get("published"):
@@ -520,7 +505,7 @@ async def handle_edit_offer_accept(callback: CallbackQuery, state: FSMContext):
     # Показываем главное меню редактирования из нового модуля
     try:
         # Импортируем функцию из нового модуля редактирования
-        from edit_post_improved import show_edit_main_menu
+        from edit_post import show_edit_main_menu
         await show_edit_main_menu(callback.message, post_id, post, user, user.get("language", "ru"))
         await callback.answer()
     except ImportError:
@@ -1056,9 +1041,10 @@ async def start_channel_step(message: Message, state: FSMContext, lang: str):
     await state.set_state(PostCreationFlow.step_channel)
     
     data = await state.get_data()
-    project_id = data["project_id"]
+    user_id = data["user_id"]
     
-    channels = supabase_db.db.list_channels(project_id=project_id)
+    # Получаем каналы пользователя
+    channels = supabase_db.db.get_user_channels(user_id)
     
     text = (
         "📺 **Создание поста - Шаг 6/7**\n\n"
@@ -1101,8 +1087,8 @@ async def handle_channel_text_input(message: Message, state: FSMContext):
         return
     
     data = await state.get_data()
-    project_id = data["project_id"]
-    channels = supabase_db.db.list_channels(project_id=project_id)
+    user_id = data["user_id"]
+    channels = supabase_db.db.get_user_channels(user_id)
     
     text = message.text.strip()
     channel = None
@@ -1329,11 +1315,25 @@ async def handle_post_confirmation_text(message: Message, state: FSMContext, is_
         user = supabase_db.db.get_user(data.get("user_id"))
         lang = user.get("language", "ru") if user else "ru"
         
+        # Получаем канал для получения chat_id
+        channel = supabase_db.db.get_channel(data["channel_id"])
+        if not channel:
+            error_text = "❌ **Ошибка**: Канал не найден"
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ])
+            if is_callback:
+                await message.edit_text(error_text, reply_markup=keyboard)
+            else:
+                await message.answer(error_text, reply_markup=keyboard)
+            await state.clear()
+            return
+        
         # Подготовка данных для сохранения
         post_data = {
-            "user_id": data["user_id"],
-            "project_id": data["project_id"],
             "channel_id": data["channel_id"],
+            "chat_id": channel["chat_id"],
+            "created_by": data["user_id"],
             "text": data.get("text"),
             "media_type": data.get("media_type"),
             "media_id": data.get("media_file_id"),
@@ -1462,8 +1462,13 @@ async def handle_post_edit_direct(callback: CallbackQuery, state: FSMContext):
     
     # Получаем пост
     post = supabase_db.db.get_post(post_id)
-    if not post or not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
-        await callback.answer("❌ Пост не найден или нет доступа!")
+    if not post:
+        await callback.answer("❌ Пост не найден!")
+        return
+    
+    # Проверяем доступ через канал
+    if not supabase_db.db.is_channel_admin(post.get("channel_id"), user_id):
+        await callback.answer("❌ У вас нет доступа к этому посту!")
         return
     
     if post.get("published"):
@@ -1494,22 +1499,6 @@ async def handle_post_edit_direct(callback: CallbackQuery, state: FSMContext):
             parse_mode="Markdown"
         )
         await callback.answer("Используйте команду /edit " + str(post_id))
-
-@router.callback_query(F.data == "edit_offer_decline")
-async def handle_edit_offer_decline(callback: CallbackQuery):
-    """Отклонение предложения редактирования"""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-    ])
-    
-    await callback.message.edit_text(
-        "✅ **Отлично!**\n\n"
-        "Пост готов к публикации в запланированное время.",
-        parse_mode="Markdown",
-        reply_markup=keyboard
-    )
-    await callback.answer()
 
 @router.callback_query(F.data == "post_edit_menu")
 async def handle_edit_menu(callback: CallbackQuery, state: FSMContext):
@@ -1683,7 +1672,8 @@ async def handle_edit_field_logic(message: Message, state: FSMContext, field: st
             await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
     
     elif field == "channel":
-        channels = supabase_db.db.list_channels(project_id=data["project_id"])
+        user_id = data["user_id"]
+        channels = supabase_db.db.get_user_channels(user_id)
         text = (
             f"📺 **Редактирование канала**\n\n"
             f"Выберите новый канал:\n\n"
