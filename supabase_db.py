@@ -58,6 +58,16 @@ class SupabaseDB:
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             );
             
+            CREATE TABLE IF NOT EXISTS channel_admins (
+                id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                channel_id BIGINT NOT NULL,
+                user_id BIGINT NOT NULL,
+                added_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                added_by BIGINT,
+                is_active BOOLEAN DEFAULT TRUE,
+                UNIQUE(channel_id, user_id)
+            );
+            
             CREATE TABLE IF NOT EXISTS posts (
                 id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                 user_id BIGINT,
@@ -84,73 +94,6 @@ class SupabaseDB:
                 daily_summary BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             );
-            
-            -- Add missing columns if they don't exist
-            DO $$ 
-            BEGIN
-                -- Add project_id to channels if missing
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='channels' AND column_name='project_id') THEN
-                    ALTER TABLE channels ADD COLUMN project_id BIGINT;
-                END IF;
-                
-                -- Add project_id to posts if missing
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='posts' AND column_name='project_id') THEN
-                    ALTER TABLE posts ADD COLUMN project_id BIGINT;
-                END IF;
-                
-                -- Rename format to parse_mode if format exists
-                IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='posts' AND column_name='format') THEN
-                    ALTER TABLE posts RENAME COLUMN format TO parse_mode;
-                END IF;
-                
-                -- Add parse_mode if missing
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='posts' AND column_name='parse_mode') THEN
-                    ALTER TABLE posts ADD COLUMN parse_mode TEXT DEFAULT 'HTML';
-                END IF;
-                
-                -- Add other missing columns
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='posts' AND column_name='notified') THEN
-                    ALTER TABLE posts ADD COLUMN notified BOOLEAN DEFAULT FALSE;
-                END IF;
-                
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='channels' AND column_name='is_admin_verified') THEN
-                    ALTER TABLE channels ADD COLUMN is_admin_verified BOOLEAN DEFAULT FALSE;
-                END IF;
-                
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='channels' AND column_name='admin_check_date') THEN
-                    ALTER TABLE channels ADD COLUMN admin_check_date TIMESTAMP WITH TIME ZONE;
-                END IF;
-                
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='created_at') THEN
-                    ALTER TABLE users ADD COLUMN created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
-                END IF;
-            END $$;
-            
-            -- Create constraints and indexes
-            DO $$
-            BEGIN
-                -- Foreign key constraints
-                IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='user_projects_user_id_fkey') THEN
-                    ALTER TABLE user_projects ADD CONSTRAINT user_projects_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(user_id);
-                END IF;
-                
-                IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='user_projects_project_id_fkey') THEN
-                    ALTER TABLE user_projects ADD CONSTRAINT user_projects_project_id_fkey FOREIGN KEY (project_id) REFERENCES projects(id);
-                END IF;
-                
-                IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='channels_project_id_fkey') THEN
-                    ALTER TABLE channels ADD CONSTRAINT channels_project_id_fkey FOREIGN KEY (project_id) REFERENCES projects(id);
-                END IF;
-                
-                IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='posts_project_id_fkey') THEN
-                    ALTER TABLE posts ADD CONSTRAINT posts_project_id_fkey FOREIGN KEY (project_id) REFERENCES projects(id);
-                END IF;
-                
-                -- Unique constraints
-                IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='channels_project_chat_unique') THEN
-                    ALTER TABLE channels ADD CONSTRAINT channels_project_chat_unique UNIQUE(project_id, chat_id);
-                END IF;
-            END $$;
             """
             try:
                 self.client.postgrest.rpc("sql", {"sql": schema_sql}).execute()
@@ -169,18 +112,10 @@ class SupabaseDB:
             return None
 
     def ensure_user(self, user_id: int, default_lang: str = None):
-        """Ensure a user exists in the users table. Creates with defaults if not present, and initializes default project."""
+        """Ensure a user exists in the users table. Creates with defaults if not present."""
         try:
             user = self.get_user(user_id)
             if user:
-                # If user exists but has no current_project (older data), create default project
-                if not user.get("current_project"):
-                    # Create a default project for existing user
-                    lang = user.get("language", "ru")
-                    proj_name = "Мой проект" if lang == "ru" else "My Project"
-                    project = self.create_project(user_id, proj_name)
-                    if project:
-                        user = self.update_user(user_id, {"current_project": project["id"]})
                 return user
             
             # Create new user with default settings
@@ -195,14 +130,7 @@ class SupabaseDB:
                 "current_project": None
             }
             res_user = self.client.table("users").insert(new_user).execute()
-            created_user = res_user.data[0] if res_user.data else None
-            if created_user:
-                # Create default project for new user
-                proj_name = "Мой проект" if lang == "ru" else "My Project"
-                project = self.create_project(user_id, proj_name)
-                if project:
-                    created_user = self.update_user(user_id, {"current_project": project["id"]})
-            return created_user
+            return res_user.data[0] if res_user.data else None
         except Exception as e:
             print(f"Error ensuring user {user_id}: {e}")
             return None
@@ -218,7 +146,7 @@ class SupabaseDB:
             print(f"Error updating user {user_id}: {e}")
             return None
 
-    # Project management
+    # Project management (legacy, поддерживаем для совместимости)
     def create_project(self, owner_id: int, name: str):
         """Create a new project and assign owner as admin."""
         try:
@@ -235,9 +163,8 @@ class SupabaseDB:
             return None
 
     def list_projects(self, user_id: int):
-        """List all projects that a user is a member of (with role info)."""
+        """List all projects that a user is a member of."""
         try:
-            # Get all project memberships for the user
             res = self.client.table("user_projects").select("*").eq("user_id", user_id).execute()
             memberships = res.data or []
             project_ids = [m["project_id"] for m in memberships]
@@ -245,7 +172,6 @@ class SupabaseDB:
                 return []
             res_proj = self.client.table("projects").select("*").in_("id", project_ids).execute()
             projects = res_proj.data or []
-            # Optionally attach role info
             for proj in projects:
                 for m in memberships:
                     if m["project_id"] == proj["id"]:
@@ -284,22 +210,31 @@ class SupabaseDB:
         except Exception:
             return False
 
-    # Channel management
-    def add_channel(self, user_id: int, chat_id: int, name: str, project_id: int, username: str = None, is_admin_verified: bool = False):
-        """Add a new channel to the project (or update its name if it exists)."""
+    # Channel management (новая логика с администраторами)
+    def add_channel(self, user_id: int, chat_id: int, name: str, project_id: int = None, username: str = None, is_admin_verified: bool = False):
+        """Add a new channel (or update its name if it exists) and add user as admin."""
         try:
-            res = self.client.table("channels").select("*").eq("project_id", project_id).eq("chat_id", chat_id).execute()
+            # Проверяем, существует ли канал с таким chat_id
+            res = self.client.table("channels").select("*").eq("chat_id", chat_id).execute()
             if res.data:
-                # Update channel info if it exists in this project
+                # Обновляем существующий канал
+                channel = res.data[0]
                 update_data = {
                     "name": name,
                     "username": username,
                     "is_admin_verified": is_admin_verified,
-                    "admin_check_date": "now()"
+                    "admin_check_date": "now()" if is_admin_verified else None
                 }
-                self.client.table("channels").update(update_data).eq("project_id", project_id).eq("chat_id", chat_id).execute()
-                return res.data[0]
+                self.client.table("channels").update(update_data).eq("id", channel["id"]).execute()
+                
+                # Добавляем пользователя как администратора, если его там нет
+                self.add_channel_admin(channel["id"], user_id, user_id)
+                
+                # Обновляем данные канала
+                res_updated = self.client.table("channels").select("*").eq("id", channel["id"]).execute()
+                return res_updated.data[0] if res_updated.data else channel
             
+            # Создаем новый канал
             data = {
                 "user_id": user_id, 
                 "project_id": project_id, 
@@ -310,60 +245,111 @@ class SupabaseDB:
                 "admin_check_date": "now()" if is_admin_verified else None
             }
             res_insert = self.client.table("channels").insert(data).execute()
-            return res_insert.data[0] if res_insert.data else None
+            channel = res_insert.data[0] if res_insert.data else None
+            
+            if channel:
+                # Добавляем создателя как администратора (триггер должен сделать это автоматически, но на всякий случай)
+                self.add_channel_admin(channel["id"], user_id, user_id)
+            
+            return channel
         except Exception as e:
-            print(f"Error adding channel {chat_id} to project {project_id}: {e}")
+            print(f"Error adding channel {chat_id}: {e}")
             return None
 
-    def list_channels(self, user_id: int = None, project_id: int = None):
-        """List all channels, optionally filtered by project or user (membership)."""
+    def add_channel_admin(self, channel_id: int, user_id: int, added_by: int):
+        """Add user as channel administrator."""
         try:
-            query = self.client.table("channels").select("*")
-            if project_id is not None:
-                query = query.eq("project_id", project_id)
-            elif user_id is not None:
-                # Find all projects for this user and list channels in those projects
-                res = self.client.table("user_projects").select("project_id").eq("user_id", user_id).execute()
-                memberships = res.data or []
-                proj_ids = [m["project_id"] for m in memberships]
-                if proj_ids:
-                    query = query.in_("project_id", proj_ids)
-                else:
-                    query = query.eq("project_id", -1)  # no projects, will return empty
-            res = query.execute()
+            data = {
+                "channel_id": channel_id,
+                "user_id": user_id,
+                "added_by": added_by,
+                "is_active": True
+            }
+            self.client.table("channel_admins").insert(data).execute()
+            return True
+        except Exception as e:
+            # Если пользователь уже администратор, это нормально
+            if "duplicate key" in str(e).lower() or "unique constraint" in str(e).lower():
+                return True
+            print(f"Error adding channel admin {user_id} to channel {channel_id}: {e}")
+            return False
+
+    def remove_channel_admin(self, channel_id: int, user_id: int):
+        """Remove user from channel administrators."""
+        try:
+            self.client.table("channel_admins").update({"is_active": False}).eq("channel_id", channel_id).eq("user_id", user_id).execute()
+            return True
+        except Exception as e:
+            print(f"Error removing channel admin {user_id} from channel {channel_id}: {e}")
+            return False
+
+    def is_channel_admin(self, channel_id: int, user_id: int):
+        """Check if user is administrator of the channel."""
+        try:
+            res = self.client.table("channel_admins").select("id").eq("channel_id", channel_id).eq("user_id", user_id).eq("is_active", True).execute()
+            return bool(res.data)
+        except Exception as e:
+            print(f"Error checking channel admin {user_id} for channel {channel_id}: {e}")
+            return False
+
+    def get_channel_admins(self, channel_id: int):
+        """Get all administrators of a channel."""
+        try:
+            res = self.client.table("channel_admins").select("user_id, added_at, added_by").eq("channel_id", channel_id).eq("is_active", True).execute()
             return res.data or []
+        except Exception as e:
+            print(f"Error getting channel admins for channel {channel_id}: {e}")
+            return []
+
+    def list_channels(self, user_id: int = None, project_id: int = None):
+        """List channels accessible to user (as admin) or by project."""
+        try:
+            if user_id is not None:
+                # Получаем каналы, где пользователь является администратором
+                res = self.client.rpc("get_user_accessible_channels", {"check_user_id": user_id}).execute()
+                return res.data or []
+            elif project_id is not None:
+                # Legacy: получаем каналы по проекту
+                query = self.client.table("channels").select("*").eq("project_id", project_id)
+                res = query.execute()
+                return res.data or []
+            else:
+                return []
         except Exception as e:
             print(f"Error listing channels: {e}")
             return []
 
     def remove_channel(self, project_id: int, identifier: str):
-        """Remove a channel (by chat_id or internal id) from the given project."""
+        """Remove a channel (by chat_id or internal id) - legacy method."""
         try:
+            # Для совместимости оставляем метод, но теперь удаляем по channel_id
             channel_to_delete = None
-            if identifier.startswith("@"):
-                return False  # Removing by username not supported
             try:
                 cid = int(identifier)
             except ValueError:
                 return False
+            
             # Try identifier as chat_id
-            res = self.client.table("channels").select("*").eq("project_id", project_id).eq("chat_id", cid).execute()
+            res = self.client.table("channels").select("*").eq("chat_id", cid).execute()
             if res.data:
                 channel_to_delete = res.data[0]
             else:
                 # Try identifier as internal channel id
-                res = self.client.table("channels").select("*").eq("project_id", project_id).eq("id", cid).execute()
+                res = self.client.table("channels").select("*").eq("id", cid).execute()
                 if res.data:
                     channel_to_delete = res.data[0]
+            
             if not channel_to_delete:
                 return False
+            
             chan_id = channel_to_delete.get("id")
             # Delete channel and any related posts
             self.client.table("channels").delete().eq("id", chan_id).execute()
             self.client.table("posts").delete().eq("channel_id", chan_id).execute()
+            self.client.table("channel_admins").delete().eq("channel_id", chan_id).execute()
             return True
         except Exception as e:
-            print(f"Error removing channel {identifier} from project {project_id}: {e}")
+            print(f"Error removing channel {identifier}: {e}")
             return False
 
     def get_channel(self, channel_id: int):
@@ -388,7 +374,7 @@ class SupabaseDB:
             print(f"Error getting channel by chat_id {chat_id}: {e}")
             return None
 
-    # Post management
+    # Post management (новая логика с проверкой прав через каналы)
     def add_post(self, post_data: dict):
         """Insert a new post into the database. Returns the inserted record."""
         try:
@@ -403,7 +389,7 @@ class SupabaseDB:
             if "buttons" in post_data and isinstance(post_data["buttons"], list):
                 post_data["buttons"] = json.dumps(post_data["buttons"])
             
-            print(f"Inserting post data: {post_data}")  # Debug log
+            print(f"Inserting post data: {post_data}")
             
             res = self.client.table("posts").insert(post_data).execute()
             return res.data[0] if res.data else None
@@ -423,19 +409,40 @@ class SupabaseDB:
             print(f"Error getting post {post_id}: {e}")
             return None
 
-    def list_posts(self, user_id: int = None, project_id: int = None, only_pending: bool = True):
-        """List posts, optionally filtered by user or project and published status."""
+    def can_user_access_post(self, user_id: int, post_id: int):
+        """Check if user can access post (is admin of the channel)."""
         try:
-            query = self.client.table("posts").select("*")
-            if only_pending:
-                query = query.eq("published", False)
-            if project_id is not None:
+            # Используем функцию базы данных для проверки прав
+            res = self.client.rpc("user_can_access_post", {
+                "check_user_id": user_id,
+                "check_post_id": post_id
+            }).execute()
+            return res.data if res.data is not None else False
+        except Exception as e:
+            print(f"Error checking post access for user {user_id}, post {post_id}: {e}")
+            return False
+
+    def list_posts(self, user_id: int = None, project_id: int = None, only_pending: bool = True):
+        """List posts accessible to user (through channel admin rights)."""
+        try:
+            if user_id is not None:
+                # Используем новую функцию для получения доступных постов
+                res = self.client.rpc("get_user_accessible_posts", {
+                    "check_user_id": user_id,
+                    "only_pending": only_pending
+                }).execute()
+                return res.data or []
+            elif project_id is not None:
+                # Legacy: получаем посты по проекту
+                query = self.client.table("posts").select("*")
+                if only_pending:
+                    query = query.eq("published", False)
                 query = query.eq("project_id", project_id)
-            elif user_id is not None:
-                query = query.eq("user_id", user_id)
-            query = query.order("publish_time", desc=False)
-            res = query.execute()
-            return res.data or []
+                query = query.order("publish_time", desc=False)
+                res = query.execute()
+                return res.data or []
+            else:
+                return []
         except Exception as e:
             print(f"Error listing posts: {e}")
             return []
@@ -525,32 +532,55 @@ class SupabaseDB:
             print(f"Error listing posts for channel {channel_id}: {e}")
             return []
 
-    def get_scheduled_posts_by_channel(self, project_id: int = None):
-        """Get scheduled posts grouped by channel."""
+    def get_scheduled_posts_by_channel(self, project_id: int = None, user_id: int = None):
+        """Get scheduled posts grouped by channel (accessible to user)."""
         try:
-            query = self.client.table("posts").select("*, channels(name, chat_id)").eq("published", False).eq("draft", False)
-            if project_id:
-                query = query.eq("project_id", project_id)
-            query = query.order("publish_time", desc=False)
-            res = query.execute()
-            return res.data or []
+            if user_id:
+                # Получаем посты через права доступа пользователя
+                res = self.client.rpc("get_user_accessible_posts", {
+                    "check_user_id": user_id,
+                    "only_pending": True
+                }).execute()
+                posts = res.data or []
+                # Фильтруем только запланированные (не черновики)
+                return [p for p in posts if not p.get('draft') and p.get('publish_time')]
+            elif project_id:
+                # Legacy: получаем по проекту
+                query = self.client.table("posts").select("*, channels(name, chat_id)").eq("published", False).eq("draft", False).eq("project_id", project_id)
+                query = query.order("publish_time", desc=False)
+                res = query.execute()
+                return res.data or []
+            else:
+                return []
         except Exception as e:
             print(f"Error getting scheduled posts by channel: {e}")
             return []
 
-    def get_draft_posts_by_channel(self, project_id: int = None):
-        """Get draft posts grouped by channel."""
+    def get_draft_posts_by_channel(self, project_id: int = None, user_id: int = None):
+        """Get draft posts grouped by channel (accessible to user)."""
         try:
-            query = self.client.table("posts").select("*, channels(name, chat_id)").eq("draft", True)
-            if project_id:
-                query = query.eq("project_id", project_id)
-            query = query.order("created_at", desc=True)
-            res = query.execute()
-            return res.data or []
+            if user_id:
+                # Получаем посты через права доступа пользователя
+                res = self.client.rpc("get_user_accessible_posts", {
+                    "check_user_id": user_id,
+                    "only_pending": False
+                }).execute()
+                posts = res.data or []
+                # Фильтруем только черновики
+                return [p for p in posts if p.get('draft')]
+            elif project_id:
+                # Legacy: получаем по проекту
+                query = self.client.table("posts").select("*, channels(name, chat_id)").eq("draft", True).eq("project_id", project_id)
+                query = query.order("created_at", desc=True)
+                res = query.execute()
+                return res.data or []
+            else:
+                return []
         except Exception as e:
             print(f"Error getting draft posts by channel: {e}")
             return []
 
+    # Notification settings (без изменений)
     def get_notification_settings(self, user_id: int):
         """Get notification settings for user."""
         try:
@@ -578,3 +608,18 @@ class SupabaseDB:
         except Exception as e:
             print(f"Error updating notification settings for user {user_id}: {e}")
             return None
+
+    # Helper methods for backward compatibility
+    def is_user_in_project(self, user_id: int, project_id: int):
+        """Legacy method - check if user has access to project posts via channels."""
+        try:
+            # Получаем каналы пользователя
+            channels = self.list_channels(user_id=user_id)
+            # Проверяем, есть ли среди них каналы с указанным project_id
+            for channel in channels:
+                if channel.get("project_id") == project_id:
+                    return True
+            return False
+        except Exception as e:
+            print(f"Error checking user {user_id} in project {project_id}: {e}")
+            return False
