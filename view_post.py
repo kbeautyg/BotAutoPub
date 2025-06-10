@@ -116,8 +116,8 @@ async def cmd_view_post(message: Message):
         await message.answer(f"❌ Пост #{post_id} не найден", reply_markup=keyboard)
         return
     
-    # Проверяем доступ
-    if not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
+    # Проверяем доступ через канал
+    if not supabase_db.db.is_channel_admin(post.get("channel_id"), user_id):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
@@ -289,8 +289,8 @@ async def cmd_publish_now(message: Message):
         await message.answer(f"❌ Пост #{post_id} не найден", reply_markup=keyboard)
         return
     
-    # Проверяем доступ
-    if not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
+    # Проверяем доступ через канал
+    if not supabase_db.db.is_channel_admin(post.get("channel_id"), user_id):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
@@ -370,8 +370,8 @@ async def cmd_reschedule_post(message: Message):
         await message.answer(f"❌ Пост #{post_id} не найден", reply_markup=keyboard)
         return
     
-    # Проверяем доступ
-    if not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
+    # Проверяем доступ через канал
+    if not supabase_db.db.is_channel_admin(post.get("channel_id"), user_id):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
@@ -435,3 +435,109 @@ async def cmd_reschedule_post(message: Message):
             parse_mode="Markdown",
             reply_markup=keyboard
         )
+
+@router.message(Command("delete"))
+async def cmd_delete_post(message: Message):
+    """Удалить пост"""
+    user_id = message.from_user.id
+    user = supabase_db.db.get_user(user_id)
+    lang = user.get("language", "ru") if user else "ru"
+    
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer(
+            "❌ **Использование команды**\n\n"
+            "`/delete <ID поста>`\n\n"
+            "Пример: `/delete 123`",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+        return
+    
+    try:
+        post_id = int(args[1])
+    except ValueError:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer("❌ ID поста должен быть числом", reply_markup=keyboard)
+        return
+    
+    # Получаем пост
+    post = supabase_db.db.get_post(post_id)
+    if not post:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer(f"❌ Пост #{post_id} не найден", reply_markup=keyboard)
+        return
+    
+    # Проверяем доступ через канал
+    if not supabase_db.db.is_channel_admin(post.get("channel_id"), user_id):
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer("❌ У вас нет доступа к этому посту", reply_markup=keyboard)
+        return
+    
+    # Подтверждение удаления
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"delete_confirm:{post_id}"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"post_full_view:{post_id}")
+        ]
+    ])
+    
+    await message.answer(
+        f"🗑 **Удаление поста #{post_id}**\n\n"
+        f"Вы уверены, что хотите удалить этот пост?\n"
+        f"Это действие нельзя отменить.",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+
+# Callback для подтверждения удаления поста
+@router.callback_query(F.data.startswith("delete_confirm:"))
+async def callback_confirm_delete_post(callback):
+    """Подтверждение удаления поста через callback"""
+    user_id = callback.from_user.id
+    post_id = int(callback.data.split(":", 1)[1])
+    
+    # Проверяем доступ
+    post = supabase_db.db.get_post(post_id)
+    if not post or not supabase_db.db.is_channel_admin(post.get("channel_id"), user_id):
+        await callback.answer("❌ У вас нет доступа к этому посту!")
+        return
+    
+    if supabase_db.db.delete_post(post_id):
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        
+        await callback.message.edit_text(
+            f"✅ **Пост #{post_id} удален**\n\n"
+            f"Пост успешно удален из базы данных.",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+    else:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await callback.message.edit_text(
+            f"❌ **Ошибка удаления**\n\n"
+            f"Не удалось удалить пост",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+    
+    await callback.answer()
