@@ -37,7 +37,7 @@ async def cmd_channels(message: Message, state: FSMContext):
     elif args[0] == "list":
         await list_channels_direct(message, user, lang)
     else:
-        await message.answer(TEXTS[lang]['channels_unknown_command'])
+        await message.answer("❌ Неизвестная команда. Используйте /channels для меню.")
 
 async def show_channels_menu(message: Message, user: dict, lang: str):
     """Показать главное меню управления каналами"""
@@ -62,7 +62,7 @@ async def callback_add_channel(callback: CallbackQuery):
     text = ("➕ **Добавление канала**\n\n"
             "Отправьте ID канала или @username канала.\n"
             "Например: `-1001234567890` или `@mychannel`\n\n"
-            "⚠️ **Важно:** Бот должен быть администратором канала!")
+            "⚠️ **Важно:** Вы должны быть администратором канала!")
     
     # Кнопка отмены
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -101,17 +101,10 @@ async def callback_channels_menu(callback: CallbackQuery):
 
 async def list_channels_callback(callback: CallbackQuery, user: dict, lang: str):
     """Показать список каналов через callback"""
-    project_id = user.get("current_project")
-    if not project_id:
-        text = "❌ Нет активного проекта. Создайте проект через /project"
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-        ])
-        await callback.message.edit_text(text, reply_markup=keyboard)
-        await callback.answer()
-        return
+    user_id = user.get("user_id")
     
-    channels = supabase_db.db.list_channels(project_id=project_id)
+    # Получаем каналы пользователя
+    channels = supabase_db.db.get_user_channels(user_id)
     if not channels:
         text = ("📋 **Список каналов**\n\n"
                 "❌ Каналы не найдены.\n"
@@ -129,7 +122,10 @@ async def list_channels_callback(callback: CallbackQuery, user: dict, lang: str)
     
     for i, channel in enumerate(channels, 1):
         admin_status = "✅" if channel.get('is_admin_verified') else "❓"
-        text += f"{i}. {admin_status} **{channel['name']}**\n"
+        role = channel.get('admin_role', 'admin')
+        role_icon = "👑" if role == "owner" else "⚙️"
+        
+        text += f"{i}. {admin_status} **{channel['name']}** {role_icon}\n"
         text += f"   ID: `{channel['chat_id']}`\n"
         if channel.get('username'):
             text += f"   @{channel['username']}\n"
@@ -149,39 +145,32 @@ async def list_channels_callback(callback: CallbackQuery, user: dict, lang: str)
 
 async def list_channels_direct(message: Message, user: dict, lang: str):
     """Показать список каналов через команду"""
-    project_id = user.get("current_project")
-    if not project_id:
-        await message.answer(TEXTS[lang]['channels_no_channels'])
-        return
+    user_id = user.get("user_id")
     
-    channels = supabase_db.db.list_channels(project_id=project_id)
+    channels = supabase_db.db.get_user_channels(user_id)
     if not channels:
-        await message.answer(TEXTS[lang]['channels_no_channels'])
+        await message.answer("❌ У вас нет доступных каналов. Добавьте канал через /channels add")
         return
     
-    text = TEXTS[lang]['channels_list_title'] + "\n"
+    text = "📋 **Ваши каналы:**\n\n"
     for i, channel in enumerate(channels, 1):
         admin_status = "✅" if channel.get('is_admin_verified') else "❓"
-        text += f"{i}. {admin_status} " + TEXTS[lang]['channels_item'].format(
-            name=channel['name'], 
-            id=channel['chat_id']
-        ) + "\n"
+        role = channel.get('admin_role', 'admin')
+        role_text = "👑 владелец" if role == "owner" else "⚙️ админ"
+        
+        text += f"{i}. {admin_status} **{channel['name']}** ({role_text})\n"
+        text += f"   ID: `{channel['chat_id']}`\n"
+        if channel.get('username'):
+            text += f"   @{channel['username']}\n"
+        text += "\n"
     
-    await message.answer(text)
+    await message.answer(text, parse_mode="Markdown")
 
 async def show_channels_for_removal(callback: CallbackQuery, user: dict, lang: str):
     """Показать каналы для удаления"""
-    project_id = user.get("current_project")
-    if not project_id:
-        text = "❌ Нет активного проекта."
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="channels_menu")]
-        ])
-        await callback.message.edit_text(text, reply_markup=keyboard)
-        await callback.answer()
-        return
+    user_id = user.get("user_id")
     
-    channels = supabase_db.db.list_channels(project_id=project_id)
+    channels = supabase_db.db.get_user_channels(user_id)
     if not channels:
         text = "❌ Нет каналов для удаления."
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -208,17 +197,9 @@ async def show_channels_for_removal(callback: CallbackQuery, user: dict, lang: s
 
 async def check_admin_rights_all(callback: CallbackQuery, user: dict, lang: str):
     """Проверить права администратора для всех каналов"""
-    project_id = user.get("current_project")
-    if not project_id:
-        text = "❌ Нет активного проекта."
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="channels_menu")]
-        ])
-        await callback.message.edit_text(text, reply_markup=keyboard)
-        await callback.answer()
-        return
+    user_id = user.get("user_id")
     
-    channels = supabase_db.db.list_channels(project_id=project_id)
+    channels = supabase_db.db.get_user_channels(user_id)
     if not channels:
         text = "❌ Нет каналов для проверки."
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -277,10 +258,7 @@ async def handle_channel_input(message: Message, state: FSMContext):
 
 async def add_channel_direct(message: Message, user: dict, lang: str, identifier: str):
     """Добавить канал напрямую"""
-    project_id = user.get("current_project")
-    if not project_id:
-        await message.answer("❌ Нет активного проекта. Создайте проект через /project")
-        return
+    user_id = user.get("user_id")
     
     try:
         # Получаем информацию о чате
@@ -294,8 +272,10 @@ async def add_channel_direct(message: Message, user: dict, lang: str, identifier
         try:
             user_member = await message.bot.get_chat_member(chat.id, message.from_user.id)
             user_is_admin = user_member.status in ['administrator', 'creator']
+            user_role = "owner" if user_member.status == 'creator' else "admin"
         except:
             user_is_admin = False
+            user_role = "admin"
         
         if not user_is_admin:
             await message.answer(
@@ -322,20 +302,24 @@ async def add_channel_direct(message: Message, user: dict, lang: str, identifier
         
         # Добавляем канал в базу данных
         channel = supabase_db.db.add_channel(
-            user_id=message.from_user.id,
             chat_id=chat.id,
             name=chat.title or chat.username or str(chat.id),
-            project_id=project_id,
             username=chat.username,
             is_admin_verified=is_admin
         )
         
         if channel:
+            # Добавляем пользователя как админа канала
+            supabase_db.db.add_channel_admin(channel['id'], user_id, user_role)
+            
             status_text = "✅ с правами администратора" if is_admin else "❓ без прав администратора"
+            role_text = "👑 владелец" if user_role == "owner" else "⚙️ админ"
+            
             await message.answer(
                 f"✅ **Канал добавлен** {status_text}\n\n"
                 f"**Название:** {channel['name']}\n"
-                f"**ID:** `{channel['chat_id']}`",
+                f"**ID:** `{channel['chat_id']}`\n"
+                f"**Ваша роль:** {role_text}",
                 parse_mode="Markdown"
             )
         else:
@@ -346,22 +330,38 @@ async def add_channel_direct(message: Message, user: dict, lang: str, identifier
 
 async def remove_channel_direct(message: Message, user: dict, lang: str, identifier: str):
     """Удалить канал напрямую"""
-    project_id = user.get("current_project")
-    if not project_id:
-        await message.answer(TEXTS[lang]['channels_not_found'])
+    user_id = user.get("user_id")
+    
+    # Получаем каналы пользователя
+    channels = supabase_db.db.get_user_channels(user_id)
+    
+    # Находим канал
+    channel = None
+    for ch in channels:
+        if (ch.get('username') and f"@{ch['username']}" == identifier) or \
+           str(ch['chat_id']) == identifier or \
+           str(ch['id']) == identifier:
+            channel = ch
+            break
+    
+    if not channel:
+        await message.answer(f"❌ Канал '{identifier}' не найден среди ваших каналов.")
         return
     
     # Создаем клавиатуру подтверждения
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Да", callback_data=f"remove_channel_direct:{identifier}"),
+            InlineKeyboardButton(text="✅ Да", callback_data=f"remove_channel_direct:{channel['id']}"),
             InlineKeyboardButton(text="❌ Нет", callback_data="remove_channel_cancel")
         ]
     ])
     
     await message.answer(
-        TEXTS[lang]['channels_remove_confirm'].format(name=identifier),
-        reply_markup=keyboard
+        f"🗑 **Подтверждение удаления**\n\n"
+        f"Вы действительно хотите удалить канал **{channel['name']}**?\n\n"
+        f"⚠️ Все посты канала также будут удалены!",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
     )
 
 @router.callback_query(F.data.startswith("remove_channel_confirm:"))
@@ -369,23 +369,28 @@ async def confirm_remove_channel(callback: CallbackQuery):
     user_id = callback.from_user.id
     user = supabase_db.db.get_user(user_id)
     lang = user.get("language", "ru") if user else "ru"
-    project_id = user.get("current_project")
     
-    channel_id = callback.data.split(":", 1)[1]
+    channel_id = int(callback.data.split(":", 1)[1])
     
     try:
+        # Проверяем, что пользователь админ этого канала
+        if not supabase_db.db.is_channel_admin(channel_id, user_id):
+            await callback.message.edit_text("❌ У вас нет прав для удаления этого канала.")
+            await callback.answer()
+            return
+        
         # Получаем информацию о канале
-        channel = supabase_db.db.get_channel(int(channel_id))
+        channel = supabase_db.db.get_channel(channel_id)
         if not channel:
             await callback.message.edit_text("❌ Канал не найден.")
             await callback.answer()
             return
         
-        # Удаляем канал
-        if supabase_db.db.remove_channel(project_id, channel_id):
+        # Удаляем канал (это удалит и все связанные данные через CASCADE)
+        if supabase_db.db.remove_channel(channel_id):
             await callback.message.edit_text(
                 f"✅ **Канал удален**\n\n"
-                f"**{channel['name']}** был удален из проекта.\n"
+                f"**{channel['name']}** был удален.\n"
                 f"Все связанные посты также удалены.",
                 parse_mode="Markdown"
             )
@@ -401,14 +406,31 @@ async def confirm_remove_channel_direct(callback: CallbackQuery):
     user_id = callback.from_user.id
     user = supabase_db.db.get_user(user_id)
     lang = user.get("language", "ru") if user else "ru"
-    project_id = user.get("current_project")
     
-    identifier = callback.data.split(":", 1)[1]
+    channel_id = int(callback.data.split(":", 1)[1])
     
-    if supabase_db.db.remove_channel(project_id, identifier):
-        await callback.message.edit_text(TEXTS[lang]['channels_removed'])
+    # Проверяем права пользователя
+    if not supabase_db.db.is_channel_admin(channel_id, user_id):
+        await callback.message.edit_text("❌ У вас нет прав для удаления этого канала.")
+        await callback.answer()
+        return
+    
+    # Получаем информацию о канале
+    channel = supabase_db.db.get_channel(channel_id)
+    if not channel:
+        await callback.message.edit_text("❌ Канал не найден.")
+        await callback.answer()
+        return
+    
+    if supabase_db.db.remove_channel(channel_id):
+        await callback.message.edit_text(
+            f"✅ **Канал удален**\n\n"
+            f"**{channel['name']}** был удален.\n"
+            f"Все связанные посты также удалены.",
+            parse_mode="Markdown"
+        )
     else:
-        await callback.message.edit_text(TEXTS[lang]['channels_not_found'])
+        await callback.message.edit_text("❌ Ошибка при удалении канала.")
     
     await callback.answer()
 
@@ -418,7 +440,7 @@ async def cancel_remove_channel(callback: CallbackQuery):
     user = supabase_db.db.get_user(user_id)
     lang = user.get("language", "ru") if user else "ru"
     
-    await callback.message.edit_text(TEXTS[lang]['confirm_post_cancel'])
+    await callback.message.edit_text("❌ Удаление канала отменено.")
     await callback.answer()
 
 @router.callback_query(F.data.startswith("channel_manage:"))
@@ -429,8 +451,14 @@ async def manage_specific_channel(callback: CallbackQuery):
     lang = user.get("language", "ru") if user else "ru"
     
     channel_id = int(callback.data.split(":", 1)[1])
-    channel = supabase_db.db.get_channel(channel_id)
     
+    # Проверяем права доступа
+    if not supabase_db.db.is_channel_admin(channel_id, user_id):
+        await callback.message.edit_text("❌ У вас нет доступа к этому каналу.")
+        await callback.answer()
+        return
+    
+    channel = supabase_db.db.get_channel(channel_id)
     if not channel:
         await callback.message.edit_text("❌ Канал не найден.")
         await callback.answer()
@@ -441,7 +469,7 @@ async def manage_specific_channel(callback: CallbackQuery):
     text = (f"⚙️ **Управление каналом**\n\n"
             f"**Название:** {channel['name']}\n"
             f"**ID:** `{channel['chat_id']}`\n"
-            f"**Статус:** {admin_status}\n")
+            f"**Статус бота:** {admin_status}\n")
     
     if channel.get('username'):
         text += f"**Username:** @{channel['username']}\n"
@@ -459,9 +487,16 @@ async def manage_specific_channel(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("check_admin:"))
 async def check_single_channel_admin(callback: CallbackQuery):
     """Проверить права администратора для одного канала"""
+    user_id = callback.from_user.id
     channel_id = int(callback.data.split(":", 1)[1])
-    channel = supabase_db.db.get_channel(channel_id)
     
+    # Проверяем права доступа
+    if not supabase_db.db.is_channel_admin(channel_id, user_id):
+        await callback.message.edit_text("❌ У вас нет доступа к этому каналу.")
+        await callback.answer()
+        return
+    
+    channel = supabase_db.db.get_channel(channel_id)
     if not channel:
         await callback.message.edit_text("❌ Канал не найден.")
         await callback.answer()
@@ -498,9 +533,16 @@ async def check_single_channel_admin(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("channel_posts:"))
 async def show_channel_posts(callback: CallbackQuery):
     """Показать посты конкретного канала"""
+    user_id = callback.from_user.id
     channel_id = int(callback.data.split(":", 1)[1])
-    channel = supabase_db.db.get_channel(channel_id)
     
+    # Проверяем права доступа
+    if not supabase_db.db.is_channel_admin(channel_id, user_id):
+        await callback.message.edit_text("❌ У вас нет доступа к этому каналу.")
+        await callback.answer()
+        return
+    
+    channel = supabase_db.db.get_channel(channel_id)
     if not channel:
         await callback.message.edit_text("❌ Канал не найден.")
         await callback.answer()
