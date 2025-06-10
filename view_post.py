@@ -1,5 +1,5 @@
-from aiogram import Router
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram import Router, F
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.filters import Command
 import supabase_db
 from __init__ import TEXTS
@@ -505,7 +505,7 @@ async def cmd_delete_post(message: Message):
 
 # Callback для подтверждения удаления поста
 @router.callback_query(F.data.startswith("delete_confirm:"))
-async def callback_confirm_delete_post(callback):
+async def callback_confirm_delete_post(callback: CallbackQuery):
     """Подтверждение удаления поста через callback"""
     user_id = callback.from_user.id
     post_id = int(callback.data.split(":", 1)[1])
