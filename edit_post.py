@@ -171,8 +171,13 @@ async def cmd_edit(message: Message, state: FSMContext):
     
     # Получаем пост
     post = supabase_db.db.get_post(post_id)
-    if not post or not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
-        await message.answer("❌ Пост не найден или у вас нет доступа")
+    if not post:
+        await message.answer("❌ Пост не найден")
+        return
+    
+    # Проверяем доступ через канал
+    if not supabase_db.db.is_channel_admin(post.get("channel_id"), user_id):
+        await message.answer("❌ У вас нет доступа к этому посту")
         return
     
     if post.get("published"):
@@ -255,8 +260,13 @@ async def handle_single_field_edit(callback: CallbackQuery, state: FSMContext):
     
     # Получаем пост
     post = supabase_db.db.get_post(post_id)
-    if not post or not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
-        await callback.answer("❌ Пост не найден или нет доступа!")
+    if not post:
+        await callback.answer("❌ Пост не найден!")
+        return
+    
+    # Проверяем доступ через канал
+    if not supabase_db.db.is_channel_admin(post.get("channel_id"), user_id):
+        await callback.answer("❌ У вас нет доступа к этому посту!")
         return
     
     # Сохраняем состояние редактирования
@@ -605,9 +615,9 @@ async def edit_channel_field(callback: CallbackQuery, state: FSMContext, post: d
     if current_channel:
         current_channel_name = current_channel["name"]
     
-    # Получаем список доступных каналов
-    project_id = user_settings.get("current_project")
-    channels = supabase_db.db.list_channels(project_id=project_id)
+    # Получаем список доступных каналов пользователя
+    user_id = user_settings.get("user_id")
+    channels = supabase_db.db.get_user_channels(user_id)
     
     if not channels:
         await callback.message.edit_text("❌ Нет доступных каналов для переноса")
@@ -680,8 +690,8 @@ async def handle_channel_edit_text_input(message: Message, state: FSMContext):
         await cancel_edit(message, state, post_id)
         return
     
-    project_id = user_settings.get("current_project")
-    channels = supabase_db.db.list_channels(project_id=project_id)
+    user_id = user_settings.get("user_id")
+    channels = supabase_db.db.get_user_channels(user_id)
     
     text = message.text.strip()
     channel = None
@@ -842,8 +852,13 @@ async def handle_edit_recreate(callback: CallbackQuery, state: FSMContext):
     
     # Получаем пост
     post = supabase_db.db.get_post(post_id)
-    if not post or not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
-        await callback.answer("❌ Пост не найден или нет доступа!")
+    if not post:
+        await callback.answer("❌ Пост не найден!")
+        return
+    
+    # Проверяем доступ через канал
+    if not supabase_db.db.is_channel_admin(post.get("channel_id"), user_id):
+        await callback.answer("❌ У вас нет доступа к этому посту!")
         return
     
     if post.get("published"):
