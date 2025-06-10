@@ -608,3 +608,68 @@ async def callback_view_post(callback: CallbackQuery):
         post = supabase_db.db.get_post(post_id)
         if not post:
             await callback.answer("❌ Пост не найден")
+            return
+        
+        # Проверяем доступ через канал
+        if not supabase_db.db.is_channel_admin(post.get("channel_id"), user_id):
+            await callback.answer("❌ У вас нет доступа к этому посту")
+            return
+        
+        # Показываем полный просмотр поста
+        try:
+            from view_post import send_post_preview, format_time_for_user
+            
+            # Отправляем полный превью поста
+            await send_post_preview(callback.message, post)
+            
+            # Отправляем информацию с кнопками
+            channel = supabase_db.db.get_channel(post['channel_id'])
+            channel_name = channel['name'] if channel else 'Неизвестный канал'
+            
+            info_text = f"👀 **Полный просмотр поста #{post_id}**\n\n"
+            info_text += f"📺 **Канал:** {channel_name}\n"
+            
+            if post.get('published'):
+                info_text += "✅ **Статус:** Опубликован\n"
+            elif post.get('draft'):
+                info_text += "📝 **Статус:** Черновик\n"
+            elif post.get('publish_time'):
+                formatted_time = format_time_for_user(post['publish_time'], user)
+                info_text += f"⏰ **Запланировано:** {formatted_time}\n"
+            
+            # Создаем клавиатуру действий
+            buttons = []
+            
+            if not post.get('published'):
+                buttons.append([
+                    InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_direct:{post_id}"),
+                    InlineKeyboardButton(text="🚀 Опубликовать", callback_data=f"post_publish_cmd:{post_id}")
+                ])
+                buttons.append([
+                    InlineKeyboardButton(text="📅 Перенести", callback_data=f"post_reschedule_cmd:{post_id}"),
+                    InlineKeyboardButton(text="🗑 Удалить", callback_data=f"post_delete_cmd:{post_id}")
+                ])
+            
+            buttons.append([
+                InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu"),
+                InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+            ])
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+            
+            await callback.message.answer(info_text, parse_mode="Markdown", reply_markup=keyboard)
+            await callback.answer()
+            
+        except ImportError:
+            # Fallback если модуль view_post недоступен
+            info_text = f"👀 **Пост #{post_id}**\n\nИспользуйте команду `/view {post_id}` для полного просмотра."
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ])
+            await callback.message.answer(info_text, parse_mode="Markdown", reply_markup=keyboard)
+            await callback.answer()
+            
+    except Exception as e:
+        print(f"Error in callback_view_post: {e}")
+        await callback.answer("❌ Произошла ошибка")
