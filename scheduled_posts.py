@@ -137,7 +137,7 @@ def get_edit_offer_keyboard(post_id: int, lang: str = "ru"):
     """Клавиатура предложения редактирования для запланированного поста"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✏️ Да, редактировать", callback_data=f"edit_offer_accept"),
+            InlineKeyboardButton(text="✏️ Да, редактировать", callback_data=f"post_edit_direct:{post_id}"),
             InlineKeyboardButton(text="✅ Нет, всё хорошо", callback_data="edit_offer_decline")
         ]
     ])
@@ -167,8 +167,21 @@ async def cmd_create_post(message: Message, state: FSMContext):
     user = supabase_db.db.ensure_user(user_id)
     lang = user.get("language", "ru") if user else "ru"
     
-    # Проверяем наличие каналов, где пользователь является администратором
-    channels = supabase_db.db.list_channels(user_id=user_id)
+    # Проверяем наличие проекта
+    project_id = user.get("current_project")
+    if not project_id:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📁 Создать проект", callback_data="proj_new")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer(
+            "❌ Нет активного проекта. Создайте проект через /project",
+            reply_markup=keyboard
+        )
+        return
+    
+    # Проверяем наличие каналов
+    channels = supabase_db.db.list_channels(project_id=project_id)
     if not channels:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📺 Добавить канал", callback_data="channels_add")],
@@ -176,8 +189,7 @@ async def cmd_create_post(message: Message, state: FSMContext):
         ])
         await message.answer(
             "❌ **Нет доступных каналов**\n\n"
-            "У вас нет каналов, где вы являетесь администратором.\n"
-            "Добавьте канал через /channels",
+            "Сначала добавьте канал через /channels",
             parse_mode="Markdown",
             reply_markup=keyboard
         )
@@ -186,6 +198,7 @@ async def cmd_create_post(message: Message, state: FSMContext):
     # Инициализируем данные поста
     await state.set_data({
         "user_id": user_id,
+        "project_id": project_id,
         "text": None,
         "media_type": None,
         "media_file_id": None,
@@ -201,11 +214,21 @@ async def cmd_create_post(message: Message, state: FSMContext):
     
     await start_text_step(message, state, lang)
 
+# Быстрое создание поста одной командой
 @router.message(Command("quickpost"))
 async def cmd_quick_post(message: Message, state: FSMContext):
     """Быстрое создание поста: /quickpost <канал> <время> <текст>"""
     user_id = message.from_user.id
     user = supabase_db.db.ensure_user(user_id)
+    project_id = user.get("current_project")
+    
+    if not project_id:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📁 Создать проект", callback_data="proj_new")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer("❌ Нет активного проекта", reply_markup=keyboard)
+        return
     
     # Парсим аргументы
     parts = message.text.split(maxsplit=3)
@@ -232,8 +255,8 @@ async def cmd_quick_post(message: Message, state: FSMContext):
     time_ref = parts[2]
     text = parts[3]
     
-    # Находим канал среди доступных пользователю
-    channels = supabase_db.db.list_channels(user_id=user_id)
+    # Находим канал
+    channels = supabase_db.db.list_channels(project_id=project_id)
     channel = None
     
     if channel_ref.isdigit():
@@ -253,7 +276,7 @@ async def cmd_quick_post(message: Message, state: FSMContext):
             [InlineKeyboardButton(text="📺 Управление каналами", callback_data="channels_menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
         ])
-        await message.answer(f"❌ Канал '{channel_ref}' не найден среди ваших каналов", reply_markup=keyboard)
+        await message.answer(f"❌ Канал '{channel_ref}' не найден", reply_markup=keyboard)
         return
     
     # Парсим время
@@ -284,8 +307,8 @@ async def cmd_quick_post(message: Message, state: FSMContext):
     # Создаем пост
     post_data = {
         "user_id": user_id,
+        "project_id": project_id,
         "channel_id": channel['id'],
-        "chat_id": channel['chat_id'],  # Для совместимости с автопостингом
         "text": text,
         "parse_mode": "HTML",
         "publish_time": publish_time.isoformat() if publish_time else None,
@@ -379,6 +402,171 @@ async def start_media_step(message: Message, state: FSMContext, lang: str):
     
     keyboard = get_navigation_keyboard("step_media", lang, can_skip=True)
     await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
+
+# Добавляем обработчик для предложения редактирования в scheduled_posts.py
+@router.callback_query(F.data.startswith("edit_offer_"))
+async def handle_edit_offer_response(callback: CallbackQuery, state: FSMContext):
+    """Обработка ответа на предложение редактирования"""
+    action = callback.data.split("_")[-1]  # accept или decline
+    
+    # Извлекаем post_id из callback_data предыдущего сообщения
+    try:
+        # Ищем post_id в тексте сообщения
+        message_text = callback.message.text
+        import re
+        post_id_match = re.search(r'#(\d+)', message_text)
+        if post_id_match:
+            post_id = int(post_id_match.group(1))
+        else:
+            await callback.answer("❌ Не удалось определить ID поста")
+            return
+    except:
+        await callback.answer("❌ Ошибка обработки")
+        return
+    
+    if action == "accept":
+        # Пользователь хочет редактировать пост
+        user_id = callback.from_user.id
+        user = supabase_db.db.get_user(user_id)
+        
+        # Получаем пост
+        post = supabase_db.db.get_post(post_id)
+        if not post or not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
+            await callback.answer("❌ Пост не найден или нет доступа!")
+            return
+        
+        if post.get("published"):
+            await callback.answer("❌ Нельзя редактировать опубликованный пост!")
+            return
+        
+        # Показываем главное меню редактирования
+        try:
+            from edit_post_improved import show_edit_main_menu
+            await show_edit_main_menu(callback.message, post_id, post, user, user.get("language", "ru"))
+            await callback.answer()
+        except ImportError:
+            # Fallback на старый метод
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_direct:{post_id}")],
+                [InlineKeyboardButton(text="👀 Просмотр", callback_data=f"post_full_view:{post_id}")],
+                [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")]
+            ])
+            
+            await callback.message.edit_text(
+                f"✏️ **Редактирование поста #{post_id}**\n\n"
+                f"Выберите действие:",
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+            await callback.answer()
+    
+    elif action == "decline":
+        # Пользователь не хочет редактировать
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_full_view:{post_id}")],
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        
+        await callback.message.edit_text(
+            f"✅ **Отлично!**\n\n"
+            f"Пост #{post_id} готов к публикации в запланированное время.",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+        await callback.answer()
+
+# Обновляем функцию get_edit_offer_keyboard
+def get_edit_offer_keyboard(post_id: int, lang: str = "ru"):
+    """Клавиатура предложения редактирования для запланированного поста"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✏️ Да, редактировать", callback_data=f"edit_offer_accept"),
+            InlineKeyboardButton(text="✅ Нет, всё хорошо", callback_data="edit_offer_decline")
+        ]
+    ])
+
+# Также добавляем новые обработчики в основной файл scheduled_posts.py для лучшей интеграции
+@router.callback_query(F.data == "edit_offer_accept")
+async def handle_edit_offer_accept(callback: CallbackQuery, state: FSMContext):
+    """Принятие предложения редактирования"""
+    # Извлекаем post_id из текста сообщения
+    try:
+        message_text = callback.message.text
+        import re
+        post_id_match = re.search(r'#(\d+)', message_text)
+        if post_id_match:
+            post_id = int(post_id_match.group(1))
+        else:
+            await callback.answer("❌ Не удалось определить ID поста")
+            return
+    except:
+        await callback.answer("❌ Ошибка обработки")
+        return
+    
+    user_id = callback.from_user.id
+    user = supabase_db.db.get_user(user_id)
+    
+    # Получаем пост
+    post = supabase_db.db.get_post(post_id)
+    if not post or not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
+        await callback.answer("❌ Пост не найден или нет доступа!")
+        return
+    
+    if post.get("published"):
+        await callback.answer("❌ Нельзя редактировать опубликованный пост!")
+        return
+    
+    # Показываем главное меню редактирования из нового модуля
+    try:
+        # Импортируем функцию из нового модуля редактирования
+        from edit_post_improved import show_edit_main_menu
+        await show_edit_main_menu(callback.message, post_id, post, user, user.get("language", "ru"))
+        await callback.answer()
+    except ImportError:
+        # Fallback если новый модуль недоступен
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_direct:{post_id}")],
+            [InlineKeyboardButton(text="👀 Просмотр", callback_data=f"post_full_view:{post_id}")],
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")]
+        ])
+        
+        await callback.message.edit_text(
+            f"✏️ **Редактирование поста #{post_id}**\n\n"
+            f"Используйте команду `/edit {post_id}` для редактирования.",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+        await callback.answer("Используйте команду /edit " + str(post_id))
+
+@router.callback_query(F.data == "edit_offer_decline")
+async def handle_edit_offer_decline(callback: CallbackQuery):
+    """Отклонение предложения редактирования"""
+    # Извлекаем post_id из текста сообщения
+    try:
+        message_text = callback.message.text
+        import re
+        post_id_match = re.search(r'#(\d+)', message_text)
+        if post_id_match:
+            post_id = int(post_id_match.group(1))
+        else:
+            post_id = 0
+    except:
+        post_id = 0
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_full_view:{post_id}" if post_id else "posts_menu")],
+        [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
+    
+    await callback.message.edit_text(
+        "✅ **Отлично!**\n\n"
+        "Пост готов к публикации в запланированное время.",
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+    await callback.answer()
 
 @router.message(PostCreationFlow.step_media, F.text | F.photo | F.video | F.animation)
 async def handle_media_input(message: Message, state: FSMContext):
@@ -715,426 +903,6 @@ async def start_time_step(message: Message, state: FSMContext, lang: str):
     keyboard = get_time_options_keyboard(lang)
     await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
 
-async def start_channel_step(message: Message, state: FSMContext, lang: str):
-    """Шаг 6: Выбор канала"""
-    await state.set_state(PostCreationFlow.step_channel)
-    
-    data = await state.get_data()
-    user_id = data["user_id"]
-    
-    # Получаем каналы, где пользователь является администратором
-    channels = supabase_db.db.list_channels(user_id=user_id)
-    
-    text = (
-        "📺 **Создание поста - Шаг 6/7**\n\n"
-        "**Выберите канал для публикации**\n\n"
-    )
-    
-    # Список каналов с номерами
-    for i, channel in enumerate(channels, 1):
-        admin_status = "✅" if channel.get('is_admin_verified') else "❓"
-        text += f"{i}. {admin_status} {channel['name']}\n"
-    
-    text += (
-        "\nТекстовые команды:\n"
-        "• Номер канала (например: `1`)\n"
-        "• @username канала\n"
-        "• `back` - назад\n"
-        "• `cancel` - отмена"
-    )
-    
-    keyboard = get_channels_keyboard(channels, lang)
-    await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
-
-async def start_preview_step(message: Message, state: FSMContext, lang: str):
-    """Шаг 7: Предварительный просмотр"""
-    await state.set_state(PostCreationFlow.step_preview)
-    
-    data = await state.get_data()
-    
-    # Получаем информацию о канале
-    channel = supabase_db.db.get_channel(data["channel_id"])
-    
-    # Сначала отправляем превью самого поста
-    await send_post_preview(message, data)
-    
-    # Затем отправляем информацию с кнопками действий
-    info_text = "👀 **Предварительный просмотр - Шаг 7/7**\n\n"
-    info_text += f"**Канал:** {channel['name'] if channel else 'Неизвестный'}\n"
-    
-    if data.get("publish_time"):
-        if isinstance(data["publish_time"], datetime):
-            user = supabase_db.db.get_user(data["user_id"])
-            user_tz = user.get('timezone', 'UTC') if user else 'UTC'
-            try:
-                user_tz_obj = ZoneInfo(user_tz)
-                local_time = data["publish_time"].astimezone(user_tz_obj)
-                time_str = local_time.strftime('%Y-%m-%d %H:%M')
-                info_text += f"**Время публикации:** {time_str} ({user_tz})\n"
-            except:
-                time_str = data["publish_time"].strftime('%Y-%m-%d %H:%M UTC')
-                info_text += f"**Время публикации:** {time_str}\n"
-        else:
-            info_text += f"**Время публикации:** {data['publish_time']}\n"
-    elif data.get("draft"):
-        info_text += "**Статус:** Черновик\n"
-    else:
-        info_text += "**Статус:** Опубликовать сейчас\n"
-    
-    if data.get("parse_mode"):
-        info_text += f"**Формат:** {data['parse_mode']}\n"
-    
-    info_text += (
-        "\n**Текстовые команды:**\n"
-        "• `confirm` или `подтвердить` - создать пост\n"
-        "• `edit` или `редактировать` - редактировать\n"
-        "• `back` - назад к выбору канала\n"
-        "• `cancel` - отменить создание\n\n"
-        "✅ Всё верно? Подтвердите создание поста."
-    )
-    
-    keyboard = get_preview_keyboard(lang)
-    await message.answer(info_text, reply_markup=keyboard, parse_mode="Markdown")
-
-async def send_post_preview(message: Message, data: dict):
-    """Отправить превью поста как он будет выглядеть в канале"""
-    text = data.get("text", "")
-    media_id = data.get("media_file_id")
-    media_type = data.get("media_type")
-    parse_mode = data.get("parse_mode")
-    buttons = data.get("buttons")
-    
-    # Подготовка кнопок
-    markup = None
-    if buttons:
-        kb = []
-        for btn in buttons:
-            if isinstance(btn, dict) and btn.get("text") and btn.get("url"):
-                kb.append([InlineKeyboardButton(text=btn["text"], url=btn["url"])])
-        if kb:
-            markup = InlineKeyboardMarkup(inline_keyboard=kb)
-    
-    # Определяем parse_mode
-    if parse_mode == "HTML":
-        pm = "HTML"
-    elif parse_mode == "Markdown":
-        pm = "Markdown"
-    else:
-        pm = None
-    
-    # Отправка превью
-    try:
-        if media_id and media_type:
-            if media_type == "photo":
-                await message.answer_photo(
-                    media_id,
-                    caption=text or None,
-                    parse_mode=pm,
-                    reply_markup=markup
-                )
-            elif media_type == "video":
-                await message.answer_video(
-                    media_id,
-                    caption=text or None,
-                    parse_mode=pm,
-                    reply_markup=markup
-                )
-            elif media_type == "animation":
-                await message.answer_animation(
-                    media_id,
-                    caption=text or None,
-                    parse_mode=pm,
-                    reply_markup=markup
-                )
-        else:
-            await message.answer(
-                text or "📝 *[Пост без текста]*",
-                parse_mode=pm or "Markdown",
-                reply_markup=markup
-            )
-    except Exception as e:
-        await message.answer(
-            f"⚠️ **Ошибка предпросмотра**\n\n"
-            f"Не удалось показать превью: {str(e)}\n"
-            f"Проверьте форматирование текста.",
-            parse_mode="Markdown"
-        )
-
-async def handle_post_confirmation_text(message: Message, state: FSMContext, is_callback: bool = False):
-    """Подтверждение создания поста"""
-    try:
-        data = await state.get_data()
-        user = supabase_db.db.get_user(data.get("user_id"))
-        lang = user.get("language", "ru") if user else "ru"
-        
-        # Подготовка данных для сохранения
-        post_data = {
-            "user_id": data["user_id"],
-            "channel_id": data["channel_id"],
-            "text": data.get("text"),
-            "media_type": data.get("media_type"),
-            "media_id": data.get("media_file_id"),
-            "parse_mode": data.get("parse_mode", "HTML"),
-            "buttons": data.get("buttons"),
-            "repeat_interval": data.get("repeat_interval"),
-            "draft": data.get("draft", False),
-            "published": False
-        }
-        
-        # Получаем chat_id для совместимости с автопостингом
-        channel = supabase_db.db.get_channel(data["channel_id"])
-        if channel:
-            post_data["chat_id"] = channel.get("chat_id")
-        
-        # Безопасная обработка времени публикации
-        publish_time = data.get("publish_time")
-        if publish_time:
-            if isinstance(publish_time, datetime):
-                post_data["publish_time"] = publish_time.isoformat()
-            else:
-                post_data["publish_time"] = str(publish_time)
-        else:
-            post_data["publish_time"] = None
-        
-        print(f"Создание поста: {post_data}")
-        
-        # Создаем пост
-        post = supabase_db.db.add_post(post_data)
-        
-        if post:
-            if data.get("draft"):
-                status_text = "📝 **Черновик сохранен**"
-                is_scheduled = False
-            elif data.get("publish_time"):
-                # Проверяем, запланирован ли пост на будущее
-                if isinstance(data["publish_time"], datetime):
-                    is_scheduled = data["publish_time"] > datetime.now(ZoneInfo("UTC"))
-                else:
-                    is_scheduled = True
-                
-                if is_scheduled:
-                    status_text = "⏰ **Пост запланирован**"
-                    # Предлагаем редактирование для запланированного поста
-                    response_text = (
-                        f"{status_text}\n\n"
-                        f"**ID поста:** #{post['id']}\n\n"
-                        f"✅ Пост создан успешно!\n\n"
-                        f"🤔 **Хотите что-то изменить в посте?**"
-                    )
-                    
-                    keyboard = get_edit_offer_keyboard(post['id'], lang)
-                    
-                    if is_callback:
-                        await message.edit_text(response_text, parse_mode="Markdown", reply_markup=keyboard)
-                    else:
-                        await message.answer(response_text, parse_mode="Markdown", reply_markup=keyboard)
-                    
-                    await state.clear()
-                    return
-                else:
-                    status_text = "🚀 **Пост будет опубликован**"
-                    is_scheduled = False
-            else:
-                status_text = "🚀 **Пост будет опубликован**"
-                is_scheduled = False
-            
-            # Для немедленной публикации или черновиков - обычная клавиатура
-            response_text = (
-                f"{status_text}\n\n"
-                f"**ID поста:** #{post['id']}\n\n"
-                f"✅ Пост создан успешно!"
-            )
-            
-            keyboard = get_post_actions_keyboard(post['id'], is_scheduled)
-            
-            if is_callback:
-                await message.edit_text(response_text, parse_mode="Markdown", reply_markup=keyboard)
-            else:
-                await message.answer(response_text, parse_mode="Markdown", reply_markup=keyboard)
-                
-        else:
-            error_text = (
-                "❌ **Ошибка создания поста**\n\n"
-                "Попробуйте еще раз или обратитесь к администратору."
-            )
-            
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="menu_create_post_direct")],
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-            ])
-            
-            if is_callback:
-                await message.edit_text(error_text, parse_mode="Markdown", reply_markup=keyboard)
-            else:
-                await message.answer(error_text, parse_mode="Markdown", reply_markup=keyboard)
-        
-        await state.clear()
-        
-    except Exception as e:
-        print(f"Ошибка при создании поста: {e}")
-        
-        error_text = (
-            f"❌ **Ошибка создания поста**\n\n"
-            f"Техническая ошибка: {str(e)}\n\n"
-            f"Попробуйте еще раз."
-        )
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="menu_create_post_direct")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-        ])
-        
-        try:
-            if is_callback:
-                await message.edit_text(error_text, parse_mode="Markdown", reply_markup=keyboard)
-            else:
-                await message.answer(error_text, parse_mode="Markdown", reply_markup=keyboard)
-        except:
-            pass
-        
-        await state.clear()
-
-# Все остальные обработчики остаются аналогично оригиналу,
-# но с обновленной логикой получения каналов через list_channels(user_id=user_id)
-
-# Дублируем остальные callback обработчики из оригинального файла
-@router.callback_query(F.data == "post_confirm")
-async def handle_post_confirmation(callback: CallbackQuery, state: FSMContext):
-    """Подтверждение создания поста через кнопку"""
-    await handle_post_confirmation_text(callback.message, state, is_callback=True)
-    await callback.answer()
-
-@router.callback_query(F.data == "edit_offer_accept")
-async def handle_edit_offer_accept(callback: CallbackQuery, state: FSMContext):
-    """Принятие предложения редактирования"""
-    try:
-        message_text = callback.message.text
-        import re
-        post_id_match = re.search(r'#(\d+)', message_text)
-        if post_id_match:
-            post_id = int(post_id_match.group(1))
-        else:
-            await callback.answer("❌ Не удалось определить ID поста")
-            return
-    except:
-        await callback.answer("❌ Ошибка обработки")
-        return
-    
-    user_id = callback.from_user.id
-    
-    # Проверяем права доступа через новую логику каналов
-    if not supabase_db.db.can_user_access_post(user_id, post_id):
-        await callback.answer("❌ Пост не найден или нет доступа!")
-        return
-    
-    post = supabase_db.db.get_post(post_id)
-    if not post:
-        await callback.answer("❌ Пост не найден!")
-        return
-    
-    if post.get("published"):
-        await callback.answer("❌ Нельзя редактировать опубликованный пост!")
-        return
-    
-    # Показываем главное меню редактирования
-    try:
-        from edit_post import show_edit_main_menu
-        user = supabase_db.db.get_user(user_id)
-        await show_edit_main_menu(callback.message, post_id, post, user, user.get("language", "ru"))
-        await callback.answer()
-    except ImportError:
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_direct:{post_id}")],
-            [InlineKeyboardButton(text="👀 Просмотр", callback_data=f"post_full_view:{post_id}")],
-            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")]
-        ])
-        
-        await callback.message.edit_text(
-            f"✏️ **Редактирование поста #{post_id}**\n\n"
-            f"Используйте команду `/edit {post_id}` для редактирования.",
-            parse_mode="Markdown",
-            reply_markup=keyboard
-        )
-        await callback.answer("Используйте команду /edit " + str(post_id))
-
-@router.callback_query(F.data == "edit_offer_decline")
-async def handle_edit_offer_decline(callback: CallbackQuery):
-    """Отклонение предложения редактирования"""
-    try:
-        message_text = callback.message.text
-        import re
-        post_id_match = re.search(r'#(\d+)', message_text)
-        if post_id_match:
-            post_id = int(post_id_match.group(1))
-        else:
-            post_id = 0
-    except:
-        post_id = 0
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_full_view:{post_id}" if post_id else "posts_menu")],
-        [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-    ])
-    
-    await callback.message.edit_text(
-        "✅ **Отлично!**\n\n"
-        "Пост готов к публикации в запланированное время.",
-        parse_mode="Markdown",
-        reply_markup=keyboard
-    )
-    await callback.answer()
-
-# Остальные обработчики времени, каналов и навигации остаются такими же,
-# но с обновленными вызовами методов базы данных
-async def go_back_step(message: Message, state: FSMContext, lang: str):
-    """Логика возврата к предыдущему шагу"""
-    data = await state.get_data()
-    history = data.get("step_history", [])
-    
-    if not history:
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
-        ])
-        await message.answer("❌ Это первый шаг!", reply_markup=keyboard)
-        return
-    
-    # Удаляем последний шаг из истории
-    history.pop()
-    data["step_history"] = history
-    
-    # Очищаем флаги редактирования
-    if "editing_field" in data:
-        del data["editing_field"]
-    if "editing_mode" in data:
-        del data["editing_mode"]
-    
-    await state.set_data(data)
-    
-    # Определяем предыдущий шаг
-    if not history:
-        await start_text_step(message, state, lang)
-    else:
-        prev_step = history[-1]
-        
-        step_functions = {
-            "step_text": start_text_step,
-            "step_media": start_media_step,
-            "step_format": start_format_step,
-            "step_buttons": start_buttons_step,
-            "step_time": start_time_step,
-            "step_channel": start_channel_step,
-        }
-        
-        if prev_step in step_functions:
-            # Удаляем этот шаг тоже, чтобы вернуться к нему заново
-            history.pop()
-            data["step_history"] = history
-            await state.set_data(data)
-            
-            await step_functions[prev_step](message, state, lang)
-
-# Обработчики времени
 @router.message(PostCreationFlow.step_time, F.text)
 async def handle_time_text_input(message: Message, state: FSMContext):
     """Обработка текстового ввода времени"""
@@ -1283,7 +1051,36 @@ async def handle_time_schedule(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=keyboard)
     await callback.answer()
 
-# Обработчики каналов
+async def start_channel_step(message: Message, state: FSMContext, lang: str):
+    """Шаг 6: Выбор канала"""
+    await state.set_state(PostCreationFlow.step_channel)
+    
+    data = await state.get_data()
+    project_id = data["project_id"]
+    
+    channels = supabase_db.db.list_channels(project_id=project_id)
+    
+    text = (
+        "📺 **Создание поста - Шаг 6/7**\n\n"
+        "**Выберите канал для публикации**\n\n"
+    )
+    
+    # Список каналов с номерами
+    for i, channel in enumerate(channels, 1):
+        admin_status = "✅" if channel.get('is_admin_verified') else "❓"
+        text += f"{i}. {admin_status} {channel['name']}\n"
+    
+    text += (
+        "\nТекстовые команды:\n"
+        "• Номер канала (например: `1`)\n"
+        "• @username канала\n"
+        "• `back` - назад\n"
+        "• `cancel` - отмена"
+    )
+    
+    keyboard = get_channels_keyboard(channels, lang)
+    await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
+
 @router.message(PostCreationFlow.step_channel, F.text)
 async def handle_channel_text_input(message: Message, state: FSMContext):
     """Обработка текстового выбора канала"""
@@ -1304,8 +1101,8 @@ async def handle_channel_text_input(message: Message, state: FSMContext):
         return
     
     data = await state.get_data()
-    user_id = data["user_id"]
-    channels = supabase_db.db.list_channels(user_id=user_id)
+    project_id = data["project_id"]
+    channels = supabase_db.db.list_channels(project_id=project_id)
     
     text = message.text.strip()
     channel = None
@@ -1363,7 +1160,571 @@ async def handle_channel_selection(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await start_preview_step(callback.message, state, lang)
 
-# Навигационные обработчики
+async def start_preview_step(message: Message, state: FSMContext, lang: str):
+    """Шаг 7: Предварительный просмотр (БЕЗ валидации - она уже была)"""
+    await state.set_state(PostCreationFlow.step_preview)
+    
+    data = await state.get_data()
+    
+    # Получаем информацию о канале
+    channel = supabase_db.db.get_channel(data["channel_id"])
+    
+    # Сначала отправляем превью самого поста
+    await send_post_preview(message, data)
+    
+    # Затем отправляем информацию с кнопками действий
+    info_text = "👀 **Предварительный просмотр - Шаг 7/7**\n\n"
+    info_text += f"**Канал:** {channel['name']}\n"
+    
+    if data.get("publish_time"):
+        if isinstance(data["publish_time"], datetime):
+            user = supabase_db.db.get_user(data["user_id"])
+            user_tz = user.get('timezone', 'UTC') if user else 'UTC'
+            try:
+                user_tz_obj = ZoneInfo(user_tz)
+                local_time = data["publish_time"].astimezone(user_tz_obj)
+                time_str = local_time.strftime('%Y-%m-%d %H:%M')
+                info_text += f"**Время публикации:** {time_str} ({user_tz})\n"
+            except:
+                time_str = data["publish_time"].strftime('%Y-%m-%d %H:%M UTC')
+                info_text += f"**Время публикации:** {time_str}\n"
+        else:
+            info_text += f"**Время публикации:** {data['publish_time']}\n"
+    elif data.get("draft"):
+        info_text += "**Статус:** Черновик\n"
+    else:
+        info_text += "**Статус:** Опубликовать сейчас\n"
+    
+    if data.get("parse_mode"):
+        info_text += f"**Формат:** {data['parse_mode']}\n"
+    
+    info_text += (
+        "\n**Текстовые команды:**\n"
+        "• `confirm` или `подтвердить` - создать пост\n"
+        "• `edit` или `редактировать` - редактировать\n"
+        "• `back` - назад к выбору канала\n"
+        "• `cancel` - отменить создание\n\n"
+        "✅ Всё верно? Подтвердите создание поста."
+    )
+    
+    keyboard = get_preview_keyboard(lang)
+    await message.answer(info_text, reply_markup=keyboard, parse_mode="Markdown")
+
+@router.message(PostCreationFlow.step_preview, F.text)
+async def handle_preview_text_input(message: Message, state: FSMContext):
+    """Обработка текстовых команд в предпросмотре"""
+    user = supabase_db.db.get_user(message.from_user.id)
+    lang = user.get("language", "ru") if user else "ru"
+    
+    if is_command(message.text, "confirm"):
+        await handle_post_confirmation_text(message, state)
+        return
+    
+    if is_command(message.text, "edit"):
+        await handle_edit_menu_text(message, state)
+        return
+    
+    if is_command(message.text, "back"):
+        await go_back_step(message, state, lang)
+        return
+    
+    if is_command(message.text, "cancel"):
+        await state.clear()
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await message.answer("❌ Создание поста отменено", reply_markup=keyboard)
+        return
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Подтвердить", callback_data="post_confirm")],
+        [InlineKeyboardButton(text="✏️ Редактировать", callback_data="post_edit_menu")],
+        [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
+    ])
+    await message.answer(
+        "❌ **Неизвестная команда**\n\n"
+        "Доступные команды:\n"
+        "• `confirm` - подтвердить создание\n"
+        "• `edit` - редактировать\n"
+        "• `back` - назад\n"
+        "• `cancel` - отмена",
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+
+async def send_post_preview(message: Message, data: dict):
+    """Отправить превью поста как он будет выглядеть в канале"""
+    text = data.get("text", "")
+    media_id = data.get("media_file_id")
+    media_type = data.get("media_type")
+    parse_mode = data.get("parse_mode")
+    buttons = data.get("buttons")
+    
+    # Подготовка кнопок
+    markup = None
+    if buttons:
+        kb = []
+        for btn in buttons:
+            if isinstance(btn, dict) and btn.get("text") and btn.get("url"):
+                kb.append([InlineKeyboardButton(text=btn["text"], url=btn["url"])])
+        if kb:
+            markup = InlineKeyboardMarkup(inline_keyboard=kb)
+    
+    # Определяем parse_mode
+    if parse_mode == "HTML":
+        pm = "HTML"
+    elif parse_mode == "Markdown":
+        pm = "Markdown"
+    else:
+        pm = None
+    
+    # Отправка превью
+    try:
+        if media_id and media_type:
+            if media_type == "photo":
+                await message.answer_photo(
+                    media_id,
+                    caption=text or None,
+                    parse_mode=pm,
+                    reply_markup=markup
+                )
+            elif media_type == "video":
+                await message.answer_video(
+                    media_id,
+                    caption=text or None,
+                    parse_mode=pm,
+                    reply_markup=markup
+                )
+            elif media_type == "animation":
+                await message.answer_animation(
+                    media_id,
+                    caption=text or None,
+                    parse_mode=pm,
+                    reply_markup=markup
+                )
+        else:
+            await message.answer(
+                text or "📝 *[Пост без текста]*",
+                parse_mode=pm or "Markdown",
+                reply_markup=markup
+            )
+    except Exception as e:
+        await message.answer(
+            f"⚠️ **Ошибка предпросмотра**\n\n"
+            f"Не удалось показать превью: {str(e)}\n"
+            f"Проверьте форматирование текста.",
+            parse_mode="Markdown"
+        )
+
+@router.callback_query(F.data == "post_confirm")
+async def handle_post_confirmation(callback: CallbackQuery, state: FSMContext):
+    """Подтверждение создания поста через кнопку"""
+    await handle_post_confirmation_text(callback.message, state, is_callback=True)
+    await callback.answer()
+
+async def handle_post_confirmation_text(message: Message, state: FSMContext, is_callback: bool = False):
+    """Подтверждение создания поста"""
+    try:
+        data = await state.get_data()
+        user = supabase_db.db.get_user(data.get("user_id"))
+        lang = user.get("language", "ru") if user else "ru"
+        
+        # Подготовка данных для сохранения
+        post_data = {
+            "user_id": data["user_id"],
+            "project_id": data["project_id"],
+            "channel_id": data["channel_id"],
+            "text": data.get("text"),
+            "media_type": data.get("media_type"),
+            "media_id": data.get("media_file_id"),
+            "parse_mode": data.get("parse_mode", "HTML"),
+            "buttons": data.get("buttons"),
+            "repeat_interval": data.get("repeat_interval"),
+            "draft": data.get("draft", False),
+            "published": False
+        }
+        
+        # Безопасная обработка времени публикации
+        publish_time = data.get("publish_time")
+        if publish_time:
+            if isinstance(publish_time, datetime):
+                post_data["publish_time"] = publish_time.isoformat()
+            else:
+                post_data["publish_time"] = str(publish_time)
+        else:
+            post_data["publish_time"] = None
+        
+        print(f"Создание поста: {post_data}")  # Логирование для отладки
+        
+        # Создаем пост
+        post = supabase_db.db.add_post(post_data)
+        
+        if post:
+            if data.get("draft"):
+                status_text = "📝 **Черновик сохранен**"
+                is_scheduled = False
+            elif data.get("publish_time"):
+                # Проверяем, запланирован ли пост на будущее
+                if isinstance(data["publish_time"], datetime):
+                    is_scheduled = data["publish_time"] > datetime.now(ZoneInfo("UTC"))
+                else:
+                    is_scheduled = True  # Предполагаем что запланирован
+                
+                if is_scheduled:
+                    status_text = "⏰ **Пост запланирован**"
+                    # Предлагаем редактирование для запланированного поста
+                    response_text = (
+                        f"{status_text}\n\n"
+                        f"**ID поста:** #{post['id']}\n\n"
+                        f"✅ Пост создан успешно!\n\n"
+                        f"🤔 **Хотите что-то изменить в посте?**"
+                    )
+                    
+                    keyboard = get_edit_offer_keyboard(post['id'], lang)
+                    
+                    if is_callback:
+                        await message.edit_text(response_text, parse_mode="Markdown", reply_markup=keyboard)
+                    else:
+                        await message.answer(response_text, parse_mode="Markdown", reply_markup=keyboard)
+                    
+                    await state.clear()
+                    return
+                else:
+                    status_text = "🚀 **Пост будет опубликован**"
+                    is_scheduled = False
+            else:
+                status_text = "🚀 **Пост будет опубликован**"
+                is_scheduled = False
+            
+            # Для немедленной публикации или черновиков - обычная клавиатура
+            response_text = (
+                f"{status_text}\n\n"
+                f"**ID поста:** #{post['id']}\n\n"
+                f"✅ Пост создан успешно!"
+            )
+            
+            keyboard = get_post_actions_keyboard(post['id'], is_scheduled)
+            
+            if is_callback:
+                await message.edit_text(response_text, parse_mode="Markdown", reply_markup=keyboard)
+            else:
+                await message.answer(response_text, parse_mode="Markdown", reply_markup=keyboard)
+                
+        else:
+            error_text = (
+                "❌ **Ошибка создания поста**\n\n"
+                "Попробуйте еще раз или обратитесь к администратору."
+            )
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="menu_create_post_direct")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ])
+            
+            if is_callback:
+                await message.edit_text(error_text, parse_mode="Markdown", reply_markup=keyboard)
+            else:
+                await message.answer(error_text, parse_mode="Markdown", reply_markup=keyboard)
+        
+        await state.clear()
+        
+    except Exception as e:
+        print(f"Ошибка при создании поста: {e}")  # Логирование ошибки
+        
+        error_text = (
+            f"❌ **Ошибка создания поста**\n\n"
+            f"Техническая ошибка: {str(e)}\n\n"
+            f"Попробуйте еще раз."
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="menu_create_post_direct")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        
+        try:
+            if is_callback:
+                await message.edit_text(error_text, parse_mode="Markdown", reply_markup=keyboard)
+            else:
+                await message.answer(error_text, parse_mode="Markdown", reply_markup=keyboard)
+        except:
+            # Если не удается отправить сообщение об ошибке
+            pass
+        
+        await state.clear()
+
+# Обработчик для прямого редактирования поста
+@router.callback_query(F.data.startswith("post_edit_direct:"))
+async def handle_post_edit_direct(callback: CallbackQuery, state: FSMContext):
+    """Прямое редактирование поста без запуска команды"""
+    post_id = int(callback.data.split(":", 1)[1])
+    user_id = callback.from_user.id
+    
+    # Получаем пост
+    post = supabase_db.db.get_post(post_id)
+    if not post or not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
+        await callback.answer("❌ Пост не найден или нет доступа!")
+        return
+    
+    if post.get("published"):
+        await callback.answer("❌ Нельзя редактировать опубликованный пост!")
+        return
+    
+    # Инициализируем данные для редактирования
+    user = supabase_db.db.get_user(user_id)
+    
+    await state.set_data({
+        "post_id": post_id,
+        "original_post": post,
+        "user_settings": user,
+        "current_step": "text",
+        "changes": {}
+    })
+    
+    # Импортируем функцию из edit_post
+    try:
+        from edit_post import start_edit_text_step
+        await start_edit_text_step(callback.message, state, user.get("language", "ru"))
+        await callback.answer()
+    except ImportError:
+        # Fallback если модуль недоступен
+        await callback.message.edit_text(
+            f"✏️ **Редактирование поста #{post_id}**\n\n"
+            f"Используйте команду `/edit {post_id}` для редактирования поста.",
+            parse_mode="Markdown"
+        )
+        await callback.answer("Используйте команду /edit " + str(post_id))
+
+@router.callback_query(F.data == "edit_offer_decline")
+async def handle_edit_offer_decline(callback: CallbackQuery):
+    """Отклонение предложения редактирования"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
+    
+    await callback.message.edit_text(
+        "✅ **Отлично!**\n\n"
+        "Пост готов к публикации в запланированное время.",
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "post_edit_menu")
+async def handle_edit_menu(callback: CallbackQuery, state: FSMContext):
+    """Показать меню редактирования через кнопку"""
+    await handle_edit_menu_text(callback.message, state, is_callback=True)
+    await callback.answer()
+
+async def handle_edit_menu_text(message: Message, state: FSMContext, is_callback: bool = False):
+    """Показать меню редактирования"""
+    text = (
+        "✏️ **Редактирование поста**\n\n"
+        "**Что хотите изменить?**\n\n"
+        "Текстовые команды:\n"
+        "• `text` - изменить текст\n"
+        "• `media` - изменить медиа\n"
+        "• `format` - изменить формат\n"
+        "• `buttons` - изменить кнопки\n"
+        "• `time` - изменить время\n"
+        "• `channel` - изменить канал\n"
+        "• `back` - к предпросмотру\n"
+        "• `cancel` - отменить"
+    )
+    
+    # Устанавливаем состояние редактирования
+    await state.set_state(PostCreationFlow.step_preview)
+    data = await state.get_data()
+    data["editing_mode"] = True
+    await state.set_data(data)
+    
+    keyboard = get_edit_menu_keyboard()
+    
+    if is_callback:
+        await message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+    else:
+        await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
+
+# Обработчик текстовых команд редактирования (только в режиме редактирования)
+async def edit_commands_filter(message):
+    """Фильтр для команд редактирования"""
+    if not message.text:
+        return False
+    return message.text.lower().strip() in ["text", "media", "format", "buttons", "time", "channel"]
+
+@router.message(PostCreationFlow.step_preview, F.text, edit_commands_filter)
+async def handle_edit_field_text_specific(message: Message, state: FSMContext):
+    """Обработка текстовых команд редактирования"""
+    data = await state.get_data()
+    if not data.get("editing_mode"):
+        return
+    
+    field = message.text.lower().strip()
+    await handle_edit_field_logic(message, state, field)
+
+@router.callback_query(F.data.startswith("edit_field:"))
+async def handle_edit_field(callback: CallbackQuery, state: FSMContext):
+    """Редактирование конкретного поля через кнопку"""
+    field = callback.data.split(":", 1)[1]
+    await handle_edit_field_logic(callback.message, state, field, is_callback=True)
+    await callback.answer()
+
+async def handle_edit_field_logic(message: Message, state: FSMContext, field: str, is_callback: bool = False):
+    """Логика редактирования поля"""
+    user = supabase_db.db.get_user(message.from_user.id)
+    lang = user.get("language", "ru") if user else "ru"
+    
+    data = await state.get_data()
+    data["editing_field"] = field
+    data["editing_mode"] = False
+    await state.set_data(data)
+    
+    if field == "text":
+        await state.set_state(PostCreationFlow.step_text)
+        current_text = data.get("text", "Нет текста")
+        text = (
+            f"📝 **Редактирование текста**\n\n"
+            f"Текущий текст:\n{current_text[:200]}{'...' if len(current_text) > 200 else ''}\n\n"
+            f"Отправьте новый текст или команду:\n"
+            f"• `skip` - оставить текущий\n"
+            f"• `cancel` - отменить редактирование"
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭️ Пропустить", callback_data="post_nav_skip")],
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
+        ])
+        
+        if is_callback:
+            await message.edit_text(text, parse_mode="Markdown", reply_markup=keyboard)
+        else:
+            await message.answer(text, parse_mode="Markdown", reply_markup=keyboard)
+    
+    elif field == "media":
+        await state.set_state(PostCreationFlow.step_media)
+        current_media = "есть" if data.get("media_file_id") else "нет"
+        text = (
+            f"🖼 **Редактирование медиа**\n\n"
+            f"Текущее медиа: {current_media}\n\n"
+            f"Отправьте новое фото/видео/GIF или команду:\n"
+            f"• `skip` - оставить текущее\n"
+            f"• `cancel` - отменить редактирование"
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭️ Пропустить", callback_data="post_nav_skip")],
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
+        ])
+        
+        if is_callback:
+            await message.edit_text(text, parse_mode="Markdown", reply_markup=keyboard)
+        else:
+            await message.answer(text, parse_mode="Markdown", reply_markup=keyboard)
+    
+    elif field == "format":
+        text = (
+            f"🎨 **Редактирование формата**\n\n"
+            f"Текущий формат: {data.get('parse_mode', 'HTML')}\n\n"
+            f"Выберите новый формат или команду:\n"
+            f"• `html` - HTML формат\n"
+            f"• `markdown` - Markdown формат\n"
+            f"• `none` - без форматирования\n"
+            f"• `skip` - оставить текущий\n"
+            f"• `cancel` - отменить"
+        )
+        
+        keyboard = get_format_keyboard(lang)
+        
+        if is_callback:
+            await message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+        else:
+            await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
+    
+    elif field == "buttons":
+        await state.set_state(PostCreationFlow.step_buttons)
+        current_buttons = data.get("buttons", [])
+        buttons_text = "\n".join([f"• {b['text']} | {b['url']}" for b in current_buttons]) if current_buttons else "Нет кнопок"
+        text = (
+            f"🔘 **Редактирование кнопок**\n\n"
+            f"Текущие кнопки:\n{buttons_text}\n\n"
+            f"Отправьте новые кнопки в формате 'Текст | URL' или команду:\n"
+            f"• `skip` - оставить текущие\n"
+            f"• `cancel` - отменить редактирование"
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭️ Пропустить", callback_data="post_nav_skip")],
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
+        ])
+        
+        if is_callback:
+            await message.edit_text(text, parse_mode="Markdown", reply_markup=keyboard)
+        else:
+            await message.answer(text, parse_mode="Markdown", reply_markup=keyboard)
+    
+    elif field == "time":
+        text = (
+            f"⏰ **Редактирование времени**\n\n"
+            f"Когда опубликовать пост?\n\n"
+            f"Команды:\n"
+            f"• `now` - опубликовать сейчас\n"
+            f"• `draft` - сохранить как черновик\n"
+            f"• Дата и время: `2024-12-25 15:30`\n"
+            f"• `skip` - оставить текущее время\n"
+            f"• `cancel` - отменить"
+        )
+        
+        keyboard = get_time_options_keyboard(lang)
+        
+        if is_callback:
+            await message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+        else:
+            await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
+    
+    elif field == "channel":
+        channels = supabase_db.db.list_channels(project_id=data["project_id"])
+        text = (
+            f"📺 **Редактирование канала**\n\n"
+            f"Выберите новый канал:\n\n"
+        )
+        
+        for i, channel in enumerate(channels, 1):
+            admin_status = "✅" if channel.get('is_admin_verified') else "❓"
+            text += f"{i}. {admin_status} {channel['name']}\n"
+        
+        text += (
+            f"\nКоманды:\n"
+            f"• Номер канала (например: `1`)\n"
+            f"• `skip` - оставить текущий канал\n"
+            f"• `cancel` - отменить"
+        )
+        
+        keyboard = get_channels_keyboard(channels, lang)
+        
+        if is_callback:
+            await message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
+        else:
+            await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
+
+@router.callback_query(F.data == "post_preview")
+async def handle_back_to_preview(callback: CallbackQuery, state: FSMContext):
+    """Вернуться к предпросмотру после редактирования"""
+    user = supabase_db.db.get_user(callback.from_user.id)
+    lang = user.get("language", "ru") if user else "ru"
+    
+    # Очищаем флаги редактирования
+    data = await state.get_data()
+    if "editing_field" in data:
+        del data["editing_field"]
+    if "editing_mode" in data:
+        del data["editing_mode"]
+    await state.set_data(data)
+    
+    await start_preview_step(callback.message, state, lang)
+    await callback.answer()
+
+# Обработчики навигации
 @router.callback_query(F.data == "post_nav_back")
 async def handle_nav_back(callback: CallbackQuery, state: FSMContext):
     """Возврат к предыдущему шагу"""
@@ -1372,6 +1733,53 @@ async def handle_nav_back(callback: CallbackQuery, state: FSMContext):
     
     await go_back_step(callback.message, state, lang)
     await callback.answer()
+
+async def go_back_step(message: Message, state: FSMContext, lang: str):
+    """Логика возврата к предыдущему шагу"""
+    data = await state.get_data()
+    history = data.get("step_history", [])
+    
+    if not history:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
+        ])
+        await message.answer("❌ Это первый шаг!", reply_markup=keyboard)
+        return
+    
+    # Удаляем последний шаг из истории
+    history.pop()
+    data["step_history"] = history
+    
+    # Очищаем флаги редактирования
+    if "editing_field" in data:
+        del data["editing_field"]
+    if "editing_mode" in data:
+        del data["editing_mode"]
+    
+    await state.set_data(data)
+    
+    # Определяем предыдущий шаг
+    if not history:
+        await start_text_step(message, state, lang)
+    else:
+        prev_step = history[-1]
+        
+        step_functions = {
+            "step_text": start_text_step,
+            "step_media": start_media_step,
+            "step_format": start_format_step,
+            "step_buttons": start_buttons_step,
+            "step_time": start_time_step,
+            "step_channel": start_channel_step,
+        }
+        
+        if prev_step in step_functions:
+            # Удаляем этот шаг тоже, чтобы вернуться к нему заново
+            history.pop()
+            data["step_history"] = history
+            await state.set_data(data)
+            
+            await step_functions[prev_step](message, state, lang)
 
 @router.callback_query(F.data == "post_nav_skip")
 async def handle_nav_skip(callback: CallbackQuery, state: FSMContext):
