@@ -55,39 +55,22 @@ def get_posts_list_keyboard(has_scheduled: bool = False, has_drafts: bool = Fals
 
 @router.message(Command("list"))
 async def cmd_list_posts(message: Message):
-    """Показать список всех постов"""
+    """Показать список всех постов доступных пользователю"""
     try:
         user_id = message.from_user.id
         
-        # Используем get_user вместо ensure_user для получения существующего пользователя
+        # Получаем или создаем пользователя
         user = supabase_db.db.get_user(user_id)
         if not user:
-            # Если пользователя нет, создаем его
             user = supabase_db.db.ensure_user(user_id)
         
-        # Проверяем что user не None после создания
         if not user:
             await message.answer("❌ Ошибка инициализации пользователя. Попробуйте позже.")
             return
         
-        project_id = user.get("current_project")
-        
-        if not project_id:
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="📁 Создать проект", callback_data="proj_new")],
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-            ])
-            await message.answer(
-                "❌ **Нет активного проекта**\n\n"
-                "Создайте проект через /project для начала работы с постами.",
-                parse_mode="Markdown",
-                reply_markup=keyboard
-            )
-            return
-        
-        # Получаем все посты проекта
+        # Получаем все посты, доступные пользователю через права администратора каналов
         try:
-            all_posts = supabase_db.db.list_posts(project_id=project_id, only_pending=False)
+            all_posts = supabase_db.db.list_posts(user_id=user_id, only_pending=False)
             if all_posts is None:
                 all_posts = []
         except Exception as e:
@@ -101,6 +84,23 @@ async def cmd_list_posts(message: Message):
                 "Не удалось загрузить список постов. Попробуйте позже.",
                 parse_mode="Markdown",
                 reply_markup=keyboard
+            )
+            return
+        
+        # Проверяем доступные каналы
+        channels = supabase_db.db.list_channels(user_id=user_id)
+        
+        if not channels:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📺 Добавить канал", callback_data="channels_add")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ])
+            await message.answer(
+                "📋 **Список постов**\n\n"
+                "❌ **У вас нет доступных каналов**\n\n"
+                "Добавьте канал, где вы являетесь администратором, чтобы начать создавать посты.",
+                reply_markup=keyboard,
+                parse_mode="Markdown"
             )
             return
         
@@ -140,15 +140,20 @@ async def cmd_list_posts(message: Message):
         published_posts.sort(key=lambda x: x.get("publish_time") or "", reverse=True)
         
         # Формируем текст
-        text = f"📋 **Все посты проекта**\n\n"
-        text += f"📊 Всего постов: {len(all_posts)}\n\n"
+        text = f"📋 **Все посты в ваших каналах**\n\n"
+        text += f"📊 Всего постов: {len(all_posts)}\n"
+        text += f"📺 Доступных каналов: {len(channels)}\n\n"
         
         if scheduled_posts:
             text += f"⏰ **Запланированные ({len(scheduled_posts)}):**\n"
             for i, post in enumerate(scheduled_posts[:5], 1):
                 try:
-                    channel = supabase_db.db.get_channel(post.get("channel_id"))
-                    channel_name = channel.get("name", "?") if channel else "?"
+                    # Используем channel_name из запроса или получаем отдельно
+                    channel_name = post.get("channel_name")
+                    if not channel_name:
+                        channel = supabase_db.db.get_channel(post.get("channel_id"))
+                        channel_name = channel.get("name", "?") if channel else "?"
+                    
                     time_str = format_post_time(post, user)
                     post_text = post.get("text", "Без текста")[:30]
                     text += f"{i}. #{post['id']} • {channel_name} • {time_str}\n   📝 {post_text}...\n"
@@ -163,8 +168,11 @@ async def cmd_list_posts(message: Message):
             text += f"📝 **Черновики ({len(draft_posts)}):**\n"
             for i, post in enumerate(draft_posts[:3], 1):
                 try:
-                    channel = supabase_db.db.get_channel(post.get("channel_id"))
-                    channel_name = channel.get("name", "?") if channel else "?"
+                    channel_name = post.get("channel_name")
+                    if not channel_name:
+                        channel = supabase_db.db.get_channel(post.get("channel_id"))
+                        channel_name = channel.get("name", "?") if channel else "?"
+                    
                     post_text = post.get("text", "Без текста")[:30]
                     text += f"{i}. #{post['id']} • {channel_name}\n   📝 {post_text}...\n"
                 except Exception as e:
@@ -179,8 +187,11 @@ async def cmd_list_posts(message: Message):
             text += f"   _Показаны последние {min(3, len(published_posts))} из {len(published_posts)}_\n"
             for i, post in enumerate(published_posts[:3], 1):
                 try:
-                    channel = supabase_db.db.get_channel(post.get("channel_id"))
-                    channel_name = channel.get("name", "?") if channel else "?"
+                    channel_name = post.get("channel_name")
+                    if not channel_name:
+                        channel = supabase_db.db.get_channel(post.get("channel_id"))
+                        channel_name = channel.get("name", "?") if channel else "?"
+                    
                     post_text = post.get("text", "Без текста")[:30]
                     text += f"{i}. #{post['id']} • {channel_name}\n   📝 {post_text}...\n"
                 except Exception as e:
@@ -217,7 +228,6 @@ async def callback_posts_menu(callback: CallbackQuery):
         # Используем get_user вместо ensure_user
         user = supabase_db.db.get_user(user_id)
         if not user:
-            # Создаем пользователя только если его нет
             user = supabase_db.db.ensure_user(user_id)
         
         if not user:
@@ -225,16 +235,18 @@ async def callback_posts_menu(callback: CallbackQuery):
             await callback.answer()
             return
         
-        project_id = user.get("current_project")
+        # Проверяем доступные каналы
+        channels = supabase_db.db.list_channels(user_id=user_id)
         
-        if not project_id:
+        if not channels:
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="📁 Создать проект", callback_data="proj_new")],
+                [InlineKeyboardButton(text="📺 Добавить канал", callback_data="channels_add")],
                 [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
             ])
             await callback.message.edit_text(
-                "❌ **Нет активного проекта**\n\n"
-                "Создайте проект через /project для начала работы с постами.",
+                "❌ **Нет доступных каналов**\n\n"
+                "У вас нет каналов, где вы являетесь администратором.\n"
+                "Добавьте канал для начала работы с постами.",
                 parse_mode="Markdown",
                 reply_markup=keyboard
             )
@@ -243,7 +255,7 @@ async def callback_posts_menu(callback: CallbackQuery):
         
         # Получаем все посты
         try:
-            all_posts = supabase_db.db.list_posts(project_id=project_id, only_pending=False)
+            all_posts = supabase_db.db.list_posts(user_id=user_id, only_pending=False)
             if all_posts is None:
                 all_posts = []
         except Exception as e:
@@ -295,6 +307,7 @@ async def callback_posts_menu(callback: CallbackQuery):
         # Формируем текст
         text = f"📋 **Управление постами**\n\n"
         text += f"📊 **Статистика:**\n"
+        text += f"📺 Ваших каналов: {len(channels)}\n"
         
         if scheduled_posts:
             text += f"⏰ Запланированных: {len(scheduled_posts)}\n"
@@ -332,19 +345,9 @@ async def callback_posts_scheduled(callback: CallbackQuery):
             await callback.answer()
             return
         
-        project_id = user.get("current_project")
-        
-        if not project_id:
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔙 Назад", callback_data="posts_menu")]
-            ])
-            await callback.message.edit_text("❌ Нет активного проекта", reply_markup=keyboard)
-            await callback.answer()
-            return
-        
-        # Получаем запланированные посты
+        # Получаем запланированные посты через новую логику
         try:
-            all_posts = supabase_db.db.list_posts(project_id=project_id, only_pending=False)
+            all_posts = supabase_db.db.list_posts(user_id=user_id, only_pending=False)
             if all_posts is None:
                 all_posts = []
             posts = [p for p in all_posts if not p.get("published") and not p.get("draft") and (p.get("publish_time") or not p.get("draft"))]
@@ -366,8 +369,10 @@ async def callback_posts_scheduled(callback: CallbackQuery):
             for post in posts:
                 try:
                     # Получаем информацию о канале
-                    channel = supabase_db.db.get_channel(post.get("channel_id"))
-                    channel_name = channel.get("name", "Неизвестный канал") if channel else "Неизвестный канал"
+                    channel_name = post.get("channel_name")
+                    if not channel_name:
+                        channel = supabase_db.db.get_channel(post.get("channel_id"))
+                        channel_name = channel.get("name", "Неизвестный канал") if channel else "Неизвестный канал"
                     
                     if channel_name != current_channel:
                         if current_channel is not None:
@@ -390,8 +395,11 @@ async def callback_posts_scheduled(callback: CallbackQuery):
                 # Показываем первые 5 постов как кнопки
                 for post in posts[:5]:
                     try:
-                        channel = supabase_db.db.get_channel(post.get("channel_id"))
-                        channel_name = channel.get("name", "?")[:10] if channel else "?"
+                        channel_name = post.get("channel_name")
+                        if not channel_name:
+                            channel = supabase_db.db.get_channel(post.get("channel_id"))
+                            channel_name = channel.get("name", "?")[:10] if channel else "?"
+                        
                         buttons.append([InlineKeyboardButton(
                             text=f"#{post['id']} • {channel_name}",
                             callback_data=f"post_view:{post['id']}"
@@ -425,19 +433,9 @@ async def callback_posts_drafts(callback: CallbackQuery):
             await callback.answer()
             return
         
-        project_id = user.get("current_project")
-        
-        if not project_id:
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔙 Назад", callback_data="posts_menu")]
-            ])
-            await callback.message.edit_text("❌ Нет активного проекта", reply_markup=keyboard)
-            await callback.answer()
-            return
-        
-        # Получаем черновики
+        # Получаем черновики через новую логику
         try:
-            all_posts = supabase_db.db.list_posts(project_id=project_id, only_pending=False)
+            all_posts = supabase_db.db.list_posts(user_id=user_id, only_pending=False)
             if all_posts is None:
                 all_posts = []
             posts = [p for p in all_posts if p.get("draft")]
@@ -457,8 +455,11 @@ async def callback_posts_drafts(callback: CallbackQuery):
             
             for i, post in enumerate(posts, 1):
                 try:
-                    channel = supabase_db.db.get_channel(post.get("channel_id"))
-                    channel_name = channel.get("name", "Канал не выбран") if channel else "Канал не выбран"
+                    channel_name = post.get("channel_name")
+                    if not channel_name:
+                        channel = supabase_db.db.get_channel(post.get("channel_id"))
+                        channel_name = channel.get("name", "Канал не выбран") if channel else "Канал не выбран"
+                    
                     post_text = post.get("text", "Без текста")[:50]
                     
                     created_at = post.get("created_at", "")
@@ -517,19 +518,9 @@ async def callback_posts_published(callback: CallbackQuery):
             await callback.answer()
             return
         
-        project_id = user.get("current_project")
-        
-        if not project_id:
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔙 Назад", callback_data="posts_menu")]
-            ])
-            await callback.message.edit_text("❌ Нет активного проекта", reply_markup=keyboard)
-            await callback.answer()
-            return
-        
-        # Получаем все посты и фильтруем опубликованные
+        # Получаем все посты и фильтруем опубликованные через новую логику
         try:
-            all_posts = supabase_db.db.list_posts(project_id=project_id, only_pending=False)
+            all_posts = supabase_db.db.list_posts(user_id=user_id, only_pending=False)
             if all_posts is None:
                 all_posts = []
             posts = [p for p in all_posts if p.get("published")]
@@ -550,8 +541,11 @@ async def callback_posts_published(callback: CallbackQuery):
             # Показываем последние 10
             for i, post in enumerate(posts[:10], 1):
                 try:
-                    channel = supabase_db.db.get_channel(post.get("channel_id"))
-                    channel_name = channel.get("name", "?") if channel else "?"
+                    channel_name = post.get("channel_name")
+                    if not channel_name:
+                        channel = supabase_db.db.get_channel(post.get("channel_id"))
+                        channel_name = channel.get("name", "?") if channel else "?"
+                    
                     post_text = post.get("text", "Без текста")[:50]
                     
                     # Форматируем дату публикации
@@ -607,8 +601,8 @@ async def callback_view_post(callback: CallbackQuery):
             await callback.answer("❌ Пост не найден")
             return
         
-        # Проверяем доступ
-        if not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
+        # Проверяем доступ через новую логику каналов
+        if not supabase_db.db.can_user_access_post(user_id, post_id):
             await callback.answer("❌ Нет доступа к посту")
             return
         
