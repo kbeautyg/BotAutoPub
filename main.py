@@ -68,7 +68,6 @@ async def error_handler(event, exception):
 # Основные модули
 import start
 import help
-import projects
 
 # Основные функциональные модули
 import main_menu as main_menu  # Используем исправленную версию
@@ -81,13 +80,10 @@ import view_post
 # Улучшенные модули
 import edit_post  # Используем новый улучшенный редактор
 
-# Модули для совместимости (для работы с существующими постами)
-
 # Регистрируем роутеры в правильном порядке
 # Важно: сначала регистрируем модули с командами, потом с общими обработчиками
 dp.include_router(start.router)
 dp.include_router(help.router)
-dp.include_router(projects.router)
 dp.include_router(channels.router)
 dp.include_router(create.router)  # Улучшенная версия создания постов
 dp.include_router(view_post.router)
@@ -111,8 +107,13 @@ async def callback_edit_field_global(callback: CallbackQuery, state: FSMContext)
             
             # Получаем пост
             post = supabase_db.db.get_post(post_id)
-            if not post or not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
-                await callback.answer("❌ Пост не найден или нет доступа!")
+            if not post:
+                await callback.answer("❌ Пост не найден!")
+                return
+            
+            # Проверяем доступ через канал
+            if not supabase_db.db.is_channel_admin(post.get("channel_id"), user_id):
+                await callback.answer("❌ У вас нет доступа к этому посту!")
                 return
             
             if post.get("published"):
@@ -260,8 +261,13 @@ async def callback_edit_post_global_updated(callback: CallbackQuery, state: FSMC
         
         # Получаем пост
         post = supabase_db.db.get_post(post_id)
-        if not post or not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
-            await callback.answer("❌ Пост не найден или нет доступа!")
+        if not post:
+            await callback.answer("❌ Пост не найден!")
+            return
+        
+        # Проверяем доступ через канал
+        if not supabase_db.db.is_channel_admin(post.get("channel_id"), user_id):
+            await callback.answer("❌ У вас нет доступа к этому посту!")
             return
         
         if post.get("published"):
@@ -313,8 +319,8 @@ async def callback_publish_post_global(callback: CallbackQuery):
             await callback.answer("Пост уже опубликован!")
             return
         
-        # Проверяем доступ
-        if not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
+        # Проверяем доступ через канал
+        if not supabase_db.db.is_channel_admin(post.get("channel_id"), user_id):
             await callback.answer("У вас нет доступа к этому посту!")
             return
         
@@ -400,9 +406,9 @@ async def callback_confirm_delete_post_global(callback: CallbackQuery):
         user_id = callback.from_user.id
         post_id = int(callback.data.split(":", 1)[1])
         
-        # Проверяем доступ
+        # Проверяем доступ через канал
         post = supabase_db.db.get_post(post_id)
-        if not post or not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
+        if not post or not supabase_db.db.is_channel_admin(post.get("channel_id"), user_id):
             await callback.answer("У вас нет доступа к этому посту!")
             return
         
@@ -449,8 +455,8 @@ async def callback_full_view_post_global(callback: CallbackQuery):
             await callback.answer("Пост не найден!")
             return
         
-        # Проверяем доступ
-        if not supabase_db.db.is_user_in_project(user_id, post.get("project_id", -1)):
+        # Проверяем доступ через канал
+        if not supabase_db.db.is_channel_admin(post.get("channel_id"), user_id):
             await callback.answer("У вас нет доступа к этому посту!")
             return
         
