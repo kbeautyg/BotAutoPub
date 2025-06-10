@@ -16,10 +16,9 @@ def get_main_menu_keyboard(lang: str = "ru"):
             ],
             [
                 InlineKeyboardButton(text="📺 Каналы", callback_data="menu_channels"),
-                InlineKeyboardButton(text="📁 Проекты", callback_data="menu_projects")
+                InlineKeyboardButton(text="⚙️ Настройки", callback_data="menu_settings")
             ],
             [
-                InlineKeyboardButton(text="⚙️ Настройки", callback_data="menu_settings"),
                 InlineKeyboardButton(text="❓ Помощь", callback_data="menu_help")
             ]
         ])
@@ -31,10 +30,9 @@ def get_main_menu_keyboard(lang: str = "ru"):
             ],
             [
                 InlineKeyboardButton(text="📺 Channels", callback_data="menu_channels"),
-                InlineKeyboardButton(text="📁 Projects", callback_data="menu_projects")
+                InlineKeyboardButton(text="⚙️ Settings", callback_data="menu_settings")
             ],
             [
-                InlineKeyboardButton(text="⚙️ Settings", callback_data="menu_settings"),
                 InlineKeyboardButton(text="❓ Help", callback_data="menu_help")
             ]
         ])
@@ -49,17 +47,12 @@ def get_welcome_text(user: dict, lang: str = "ru") -> str:
         text += "• ⏰ Автоматически публиковать контент\n"
         text += "• 📊 Отслеживать статистику\n\n"
         
-        if user and user.get('current_project'):
-            project = supabase_db.db.get_project(user['current_project'])
-            if project and project.get('name'):
-                text += f"📁 **Текущий проект:** {project['name']}\n"
-        
         # Быстрая статистика
-        if user and user.get('current_project'):
+        if user:
             try:
-                channels = supabase_db.db.list_channels(project_id=user['current_project'])
-                posts = supabase_db.db.list_posts(project_id=user['current_project'], only_pending=True)
-                text += f"📺 Каналов: {len(channels) if channels else 0} | ⏰ Запланированных постов: {len(posts) if posts else 0}\n\n"
+                channels = supabase_db.db.get_user_channels(user['user_id'])
+                posts = supabase_db.db.list_posts(user_id=user['user_id'], only_pending=True)
+                text += f"📺 Ваших каналов: {len(channels) if channels else 0} | ⏰ Запланированных постов: {len(posts) if posts else 0}\n\n"
             except Exception as e:
                 print(f"Error getting stats for user: {e}")
                 text += "\n"
@@ -73,17 +66,12 @@ def get_welcome_text(user: dict, lang: str = "ru") -> str:
         text += "• ⏰ Automatically publish content\n"
         text += "• 📊 Track statistics\n\n"
         
-        if user and user.get('current_project'):
-            project = supabase_db.db.get_project(user['current_project'])
-            if project and project.get('name'):
-                text += f"📁 **Current project:** {project['name']}\n"
-        
         # Quick stats
-        if user and user.get('current_project'):
+        if user:
             try:
-                channels = supabase_db.db.list_channels(project_id=user['current_project'])
-                posts = supabase_db.db.list_posts(project_id=user['current_project'], only_pending=True)
-                text += f"📺 Channels: {len(channels) if channels else 0} | ⏰ Scheduled posts: {len(posts) if posts else 0}\n\n"
+                channels = supabase_db.db.get_user_channels(user['user_id'])
+                posts = supabase_db.db.list_posts(user_id=user['user_id'], only_pending=True)
+                text += f"📺 Your channels: {len(channels) if channels else 0} | ⏰ Scheduled posts: {len(posts) if posts else 0}\n\n"
             except Exception as e:
                 print(f"Error getting stats for user: {e}")
                 text += "\n"
@@ -134,22 +122,8 @@ async def callback_create_post(callback: CallbackQuery, state: FSMContext):
     user = supabase_db.db.ensure_user(user_id)
     lang = user.get("language", "ru") if user else "ru"
     
-    # Проверяем наличие проекта
-    project_id = user.get("current_project")
-    if not project_id:
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📁 Создать проект", callback_data="proj_new")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-        ])
-        await callback.message.edit_text(
-            "❌ Нет активного проекта. Создайте проект для начала работы.",
-            reply_markup=keyboard
-        )
-        await callback.answer()
-        return
-    
-    # Проверяем наличие каналов
-    channels = supabase_db.db.list_channels(project_id=project_id)
+    # Проверяем наличие каналов у пользователя
+    channels = supabase_db.db.get_user_channels(user_id)
     if not channels:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📺 Добавить канал", callback_data="channels_add")],
@@ -167,7 +141,6 @@ async def callback_create_post(callback: CallbackQuery, state: FSMContext):
     # Инициализируем данные поста и запускаем процесс создания
     await state.set_data({
         "user_id": user_id,
-        "project_id": project_id,
         "text": None,
         "media_type": None,
         "media_file_id": None,
@@ -239,85 +212,6 @@ async def callback_channels_menu(callback: CallbackQuery):
         )
         await callback.answer()
 
-@router.callback_query(F.data == "menu_projects")
-async def callback_projects_menu(callback: CallbackQuery):
-    """Меню проектов - прямой запуск"""
-    user_id = callback.from_user.id
-    user = supabase_db.db.get_user(user_id)
-    if not user:
-        user = supabase_db.db.ensure_user(user_id)
-    
-    lang = user.get("language", "ru") if user else "ru"
-    
-    try:
-        # Получаем проекты пользователя
-        projects = supabase_db.db.list_projects(user_id)
-        
-        if not projects:
-            # Если нет проектов, предлагаем создать
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="📁 Создать проект", callback_data="proj_new")],
-                [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]
-            ])
-            await callback.message.edit_text(
-                "📁 **Управление проектами**\n\n"
-                "У вас пока нет проектов. Создайте первый проект для начала работы!",
-                reply_markup=keyboard,
-                parse_mode="Markdown"
-            )
-            await callback.answer()
-            return
-        
-        # Формируем список проектов
-        text = "📁 **Ваши проекты:**\n\n"
-        current_proj = user.get("current_project")
-        
-        buttons = []
-        for proj in projects:
-            name = proj.get("name", "Unnamed")
-            is_current = current_proj and proj["id"] == current_proj
-            
-            # Добавляем проект в текст
-            if is_current:
-                text += f"• **{name}** ✅ (текущий)\n"
-            else:
-                text += f"• {name}\n"
-            
-            # Добавляем кнопку для переключения
-            button_text = f"{name}" + (" ✅" if is_current else "")
-            buttons.append([InlineKeyboardButton(
-                text=button_text,
-                callback_data=f"proj_switch:{proj['id']}"
-            )])
-        
-        # Добавляем кнопки управления
-        buttons.append([InlineKeyboardButton(text="➕ Новый проект", callback_data="proj_new")])
-        buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")])
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-        
-        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
-        await callback.answer()
-        
-    except Exception as e:
-        print(f"Error in callback_projects_menu: {e}")
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]
-        ])
-        
-        await callback.message.edit_text(
-            "📁 **Управление проектами**\n\n"
-            "Используйте команду `/project` для управления проектами.\n\n"
-            "**Команды:**\n"
-            "• `/project` - список проектов\n"
-            "• `/project new <название>` - создать проект\n"
-            "• `/project switch <ID>` - переключить проект\n"
-            "• `/project invite <user_id>` - пригласить пользователя",
-            reply_markup=keyboard,
-            parse_mode="Markdown"
-        )
-        await callback.answer()
-
 @router.callback_query(F.data == "menu_settings")
 async def callback_settings_menu(callback: CallbackQuery):
     """Меню настроек"""
@@ -383,10 +277,6 @@ async def callback_help_menu(callback: CallbackQuery):
 • `/channels` - меню управления каналами
 • `/channels add <@канал или ID>` - добавить канал
 • `/channels list` - список каналов
-
-**Проекты:**
-• `/project` - управление проектами
-• `/project new <название>` - создать проект
 
 **Настройки:**
 • `/settings` - настройки профиля
@@ -455,16 +345,9 @@ async def callback_quick_stats(callback: CallbackQuery):
         if not user:
             user = supabase_db.db.ensure_user(user_id)
         
-        project_id = user.get("current_project") if user else None
-        
-        if not project_id:
-            await callback.message.edit_text("❌ Нет активного проекта.")
-            await callback.answer()
-            return
-        
         try:
-            channels = supabase_db.db.list_channels(project_id=project_id) or []
-            all_posts = supabase_db.db.list_posts(project_id=project_id, only_pending=False) or []
+            channels = supabase_db.db.get_user_channels(user_id) or []
+            all_posts = supabase_db.db.list_posts(user_id=user_id, only_pending=False) or []
             scheduled = [p for p in all_posts if not p.get('published') and not p.get('draft') and p.get('publish_time')]
             drafts = [p for p in all_posts if p.get('draft')]
             published = [p for p in all_posts if p.get('published')]
@@ -500,15 +383,8 @@ async def callback_quick_upcoming(callback: CallbackQuery):
         if not user:
             user = supabase_db.db.ensure_user(user_id)
         
-        project_id = user.get("current_project") if user else None
-        
-        if not project_id:
-            await callback.message.edit_text("❌ Нет активного проекта.")
-            await callback.answer()
-            return
-        
         try:
-            posts = supabase_db.db.get_scheduled_posts_by_channel(project_id) or []
+            posts = supabase_db.db.get_scheduled_posts_by_channel(user_id) or []
             
             if not posts:
                 text = "⏰ **Ближайшие посты**\n\n❌ Нет запланированных постов."
