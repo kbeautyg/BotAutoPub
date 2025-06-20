@@ -9,6 +9,165 @@ from zoneinfo import ZoneInfo
 
 router = Router()
 
+def escape_markdown_v1(text):
+    """Экранирование символов для Markdown в Telegram"""
+    if not text:
+        return text
+    
+    # Символы, которые нужно экранировать в Markdown
+    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    
+    for char in special_chars:
+        text = text.replace(char, f'\\{char}')
+    
+    return text
+
+def safe_markdown_format(text, parse_mode):
+    """Безопасное форматирование текста для Telegram"""
+    if not text:
+        return text
+    
+    if parse_mode and parse_mode.lower() == "markdown":
+        return escape_markdown_v1(text)
+    else:
+        return text
+
+# Замените функцию send_post_preview в view_post.py на эту версию:
+
+async def send_post_preview(message: Message, post: dict, channel: dict = None):
+    """Отправить превью поста"""
+    text = post.get("text", "")
+    media_id = post.get("media_id")
+    media_type = post.get("media_type")
+    format_type = post.get("parse_mode") or post.get("format")
+    buttons = post.get("buttons")
+    
+    # Безопасное форматирование текста
+    if format_type and format_type.lower() == "markdown":
+        safe_text = safe_markdown_format(text, format_type)
+    else:
+        safe_text = text
+    
+    # Определяем parse_mode
+    parse_mode = None
+    if format_type:
+        if format_type.lower() == "markdown":
+            parse_mode = "Markdown"
+        elif format_type.lower() == "html":
+            parse_mode = "HTML"
+    
+    # Подготовка кнопок
+    markup = None
+    if buttons:
+        try:
+            if isinstance(buttons, str):
+                buttons_list = json.loads(buttons)
+            else:
+                buttons_list = buttons
+            
+            if buttons_list:
+                kb = []
+                for btn in buttons_list:
+                    if isinstance(btn, dict) and btn.get("text") and btn.get("url"):
+                        kb.append([InlineKeyboardButton(text=btn["text"], url=btn["url"])])
+                if kb:
+                    markup = InlineKeyboardMarkup(inline_keyboard=kb)
+        except:
+            pass
+    
+    # Отправка превью с обработкой ошибок парсинга
+    try:
+        if media_id and media_type:
+            if media_type.lower() == "photo":
+                await message.answer_photo(
+                    media_id,
+                    caption=safe_text or "📝 *Пост без текста*",
+                    parse_mode=parse_mode or "Markdown",
+                    reply_markup=markup
+                )
+            elif media_type.lower() == "video":
+                await message.answer_video(
+                    media_id,
+                    caption=safe_text or "📝 *Пост без текста*",
+                    parse_mode=parse_mode or "Markdown",
+                    reply_markup=markup
+                )
+            elif media_type.lower() == "animation":
+                await message.answer_animation(
+                    media_id,
+                    caption=safe_text or "📝 *Пост без текста*",
+                    parse_mode=parse_mode or "Markdown",
+                    reply_markup=markup
+                )
+        else:
+            await message.answer(
+                safe_text or "📝 *Пост без текста*",
+                parse_mode=parse_mode or "Markdown",
+                reply_markup=markup
+            )
+    except Exception as e:
+        error_msg = str(e).lower()
+        
+        # Если ошибка связана с парсингом Markdown - отправляем без форматирования
+        if "can't parse entities" in error_msg or "can't find end of the entity" in error_msg:
+            try:
+                # Отправляем без форматирования
+                if media_id and media_type:
+                    if media_type.lower() == "photo":
+                        await message.answer_photo(
+                            media_id,
+                            caption=text or "Пост без текста",
+                            reply_markup=markup
+                        )
+                    elif media_type.lower() == "video":
+                        await message.answer_video(
+                            media_id,
+                            caption=text or "Пост без текста",
+                            reply_markup=markup
+                        )
+                    elif media_type.lower() == "animation":
+                        await message.answer_animation(
+                            media_id,
+                            caption=text or "Пост без текста",
+                            reply_markup=markup
+                        )
+                else:
+                    await message.answer(
+                        text or "Пост без текста",
+                        reply_markup=markup
+                    )
+                
+                # Предупреждаем о проблеме с форматированием
+                await message.answer(
+                    "⚠️ **Предупреждение:** В тексте поста есть символы, несовместимые с Markdown форматированием.\n"
+                    "Превью показано без форматирования. При публикации рекомендуется использовать HTML формат.",
+                    parse_mode="Markdown"
+                )
+            except Exception as final_error:
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                ])
+                await message.answer(
+                    f"❌ **Критическая ошибка предпросмотра**\n\n"
+                    f"Ошибка: {str(final_error)}\n\n"
+                    f"Невозможно отобразить содержимое поста.",
+                    parse_mode="Markdown",
+                    reply_markup=keyboard
+                )
+        else:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ])
+            await message.answer(
+                f"⚠️ **Ошибка предпросмотра**\n\n"
+                f"Не удалось показать превью: {str(e)}\n"
+                f"Проверьте форматирование текста.",
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+
 def format_time_for_user(time_str: str, user: dict) -> str:
     """Форматировать время для отображения пользователю в его часовом поясе"""
     try:
