@@ -6,6 +6,196 @@ import supabase_db
 from __init__ import TEXTS
 import json
 
+# Добавьте эти функции в начало файла auto_post_fixed.py после импортов
+
+def escape_markdown_v1(text):
+    """Экранирование символов для Markdown в Telegram"""
+    if not text:
+        return text
+    
+    # Символы, которые нужно экранировать в Markdown
+    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    
+    for char in special_chars:
+        text = text.replace(char, f'\\{char}')
+    
+    return text
+
+def safe_publish_text(text, parse_mode):
+    """Подготовка текста для безопасной публикации"""
+    if not text:
+        return text
+    
+    if parse_mode and parse_mode.lower() == "markdown":
+        return escape_markdown_v1(text)
+    else:
+        return text
+
+# В функции start_scheduler замените блок попытки публикации на этот:
+
+                # Try to publish
+                try:
+                    # Безопасная подготовка текста
+                    safe_text = safe_publish_text(text, parse_mode)
+                    
+                    if media_id and media_type:
+                        if media_type.lower() == "photo":
+                            await bot.send_photo(
+                                chat_id, 
+                                photo=media_id, 
+                                caption=safe_text, 
+                                parse_mode=parse_mode, 
+                                reply_markup=markup
+                            )
+                        elif media_type.lower() == "video":
+                            await bot.send_video(
+                                chat_id, 
+                                video=media_id, 
+                                caption=safe_text, 
+                                parse_mode=parse_mode, 
+                                reply_markup=markup
+                            )
+                        elif media_type.lower() == "animation":
+                            await bot.send_animation(
+                                chat_id,
+                                animation=media_id,
+                                caption=safe_text,
+                                parse_mode=parse_mode,
+                                reply_markup=markup
+                            )
+                        else:
+                            await bot.send_message(
+                                chat_id, 
+                                safe_text or TEXTS['en']['no_text'], 
+                                parse_mode=parse_mode, 
+                                reply_markup=markup
+                            )
+                    else:
+                        await bot.send_message(
+                            chat_id, 
+                            safe_text or TEXTS['en']['no_text'], 
+                            parse_mode=parse_mode, 
+                            reply_markup=markup
+                        )
+                    
+                    print(f"✅ Пост #{post_id} успешно опубликован в канал {chat_id}")
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    
+                    # Если ошибка парсинга Markdown - пробуем без форматирования
+                    if "can't parse entities" in error_msg.lower() or "can't find end of the entity" in error_msg.lower():
+                        try:
+                            print(f"⚠️ Ошибка Markdown в посте #{post_id}, отправляем без форматирования")
+                            
+                            if media_id and media_type:
+                                if media_type.lower() == "photo":
+                                    await bot.send_photo(
+                                        chat_id, 
+                                        photo=media_id, 
+                                        caption=text or "Пост без текста", 
+                                        reply_markup=markup
+                                    )
+                                elif media_type.lower() == "video":
+                                    await bot.send_video(
+                                        chat_id, 
+                                        video=media_id, 
+                                        caption=text or "Пост без текста", 
+                                        reply_markup=markup
+                                    )
+                                elif media_type.lower() == "animation":
+                                    await bot.send_animation(
+                                        chat_id,
+                                        animation=media_id,
+                                        caption=text or "Пост без текста",
+                                        reply_markup=markup
+                                    )
+                                else:
+                                    await bot.send_message(
+                                        chat_id, 
+                                        text or TEXTS['en']['no_text'], 
+                                        reply_markup=markup
+                                    )
+                            else:
+                                await bot.send_message(
+                                    chat_id, 
+                                    text or TEXTS['en']['no_text'], 
+                                    reply_markup=markup
+                                )
+                            
+                            print(f"✅ Пост #{post_id} опубликован без форматирования")
+                            
+                            # Уведомляем пользователя о проблеме с форматированием
+                            if user_id:
+                                try:
+                                    await bot.send_message(
+                                        user_id, 
+                                        f"⚠️ **Пост #{post_id} опубликован с предупреждением**\n\n"
+                                        f"В тексте поста обнаружены символы, несовместимые с Markdown форматированием. "
+                                        f"Пост опубликован без форматирования.\n\n"
+                                        f"💡 **Рекомендация:** Используйте HTML формат для более гибкого форматирования текста.",
+                                        parse_mode="Markdown"
+                                    )
+                                except:
+                                    pass
+                            
+                        except Exception as final_error:
+                            print(f"❌ Критическая ошибка публикации поста #{post_id}: {str(final_error)}")
+                            # Обычная обработка ошибки как в оригинальном коде
+                            if user_id:
+                                chan_name = str(chat_id)
+                                channel = supabase_db.db.get_channel_by_chat_id(chat_id)
+                                if channel:
+                                    chan_name = channel.get("name") or str(chat_id)
+                                
+                                lang = "ru"
+                                user = supabase_db.db.get_user(user_id)
+                                if user:
+                                    lang = user.get("language", "ru")
+                                
+                                msg_text = TEXTS[lang]['error_post_failed'].format(
+                                    id=post_id, 
+                                    channel=chan_name, 
+                                    error=str(final_error)
+                                )
+                                
+                                try:
+                                    await bot.send_message(user_id, msg_text)
+                                except:
+                                    pass
+                            
+                            supabase_db.db.mark_post_published(post_id)
+                            continue
+                    
+                    else:
+                        print(f"❌ Ошибка публикации поста #{post_id}: {error_msg}")
+                        
+                        # Обычная обработка ошибки
+                        if user_id:
+                            chan_name = str(chat_id)
+                            channel = supabase_db.db.get_channel_by_chat_id(chat_id)
+                            if channel:
+                                chan_name = channel.get("name") or str(chat_id)
+                            
+                            lang = "ru"
+                            user = supabase_db.db.get_user(user_id)
+                            if user:
+                                lang = user.get("language", "ru")
+                            
+                            msg_text = TEXTS[lang]['error_post_failed'].format(
+                                id=post_id, 
+                                channel=chan_name, 
+                                error=error_msg
+                            )
+                            
+                            try:
+                                await bot.send_message(user_id, msg_text)
+                            except:
+                                pass
+                        
+                        supabase_db.db.mark_post_published(post_id)
+                        continue
+
 async def start_scheduler(bot: Bot, check_interval: int = 5):
     """Background task to publish scheduled posts and send notifications."""
     while True:
