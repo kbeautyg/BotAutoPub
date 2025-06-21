@@ -9,6 +9,7 @@ import supabase_db
 from __init__ import TEXTS
 import re
 import json
+import html
 
 router = Router()
 
@@ -30,6 +31,34 @@ def is_command(text: str, command: str) -> bool:
         return False
     text_lower = text.strip().lower()
     return text_lower in TEXT_COMMANDS.get(command, [])
+
+def clean_text_for_format(text: str, parse_mode: str) -> str:
+    """Очистить и подготовить текст для определенного формата"""
+    if not text:
+        return text
+    
+    if parse_mode == "Markdown":
+        # Экранируем специальные символы Markdown
+        # Сначала убираем HTML-теги если они есть
+        text = re.sub(r'<[^>]+>', '', text)
+        
+        # Экранируем специальные символы Markdown v2
+        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        for char in special_chars:
+            text = text.replace(char, '\\' + char)
+        
+        return text
+    
+    elif parse_mode == "HTML":
+        # Экранируем HTML символы если нет тегов
+        if not re.search(r'<[^>]+>', text):
+            text = html.escape(text)
+        return text
+    
+    else:
+        # Обычный текст - убираем все теги и специальные символы
+        text = re.sub(r'<[^>]+>', '', text)
+        return text
 
 def get_navigation_keyboard(current_step: str, lang: str = "ru", can_skip: bool = True):
     """Создать клавиатуру навигации для текущего шага"""
@@ -404,7 +433,24 @@ async def handle_edit_offer_response(callback: CallbackQuery, state: FSMContext)
         if post_id_match:
             post_id = int(post_id_match.group(1))
         else:
-            await callback.answer("❌ Не удалось определить ID поста")
+            await callback.answer()
+
+@router.callback_query(F.data == "post_nav_cancel")
+async def handle_nav_cancel(callback: CallbackQuery, state: FSMContext):
+    """Отменить создание поста"""
+    await state.clear()
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
+    
+    await callback.message.edit_text(
+        "❌ **Создание поста отменено**\n\n"
+        "Все данные удалены.",
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+    await callback.answer()answer("❌ Не удалось определить ID поста")
             return
     except:
         await callback.answer("❌ Ошибка обработки")
@@ -1239,30 +1285,49 @@ async def handle_preview_text_input(message: Message, state: FSMContext):
     )
 
 async def send_post_preview(message: Message, data: dict):
-    """Отправить превью поста как он будет выглядеть в канале"""
+    """Отправить превью поста как он будет выглядеть в канале с правильной обработкой форматирования"""
     text = data.get("text", "")
     media_id = data.get("media_file_id")
     media_type = data.get("media_type")
     parse_mode = data.get("parse_mode")
     buttons = data.get("buttons")
     
+    # Определяем parse_mode
+    pm = None
+    if parse_mode:
+        if parse_mode.lower() == "markdown":
+            pm = "Markdown"
+        elif parse_mode.lower() == "html":
+            pm = "HTML"
+    
+    # Очищаем и подготавливаем текст для формата
+    if text and pm:
+        try:
+            cleaned_text = clean_text_for_format(text, pm)
+        except Exception as e:
+            print(f"Error cleaning text for preview: {e}")
+            cleaned_text = text
+            pm = None  # Отключаем форматирование при ошибке
+    else:
+        cleaned_text = text
+    
     # Подготовка кнопок
     markup = None
     if buttons:
-        kb = []
-        for btn in buttons:
-            if isinstance(btn, dict) and btn.get("text") and btn.get("url"):
-                kb.append([InlineKeyboardButton(text=btn["text"], url=btn["url"])])
-        if kb:
-            markup = InlineKeyboardMarkup(inline_keyboard=kb)
+        try:
+            kb = []
+            for btn in buttons:
+                if isinstance(btn, dict) and btn.get("text") and btn.get("url"):
+                    kb.append([InlineKeyboardButton(text=btn["text"], url=btn["url"])])
+            if kb:
+                markup = InlineKeyboardMarkup(inline_keyboard=kb)
+        except Exception as e:
+            print(f"Error processing buttons in preview: {e}")
+            pass
     
-    # Определяем parse_mode
-    if parse_mode == "HTML":
-        pm = "HTML"
-    elif parse_mode == "Markdown":
-        pm = "Markdown"
-    else:
-        pm = None
+    # Fallback text если основной пустой
+    final_text = cleaned_text or "📝 *Пост без текста*"
+    fallback_parse_mode = pm or "Markdown"
     
     # Отправка превью
     try:
@@ -1270,37 +1335,69 @@ async def send_post_preview(message: Message, data: dict):
             if media_type == "photo":
                 await message.answer_photo(
                     media_id,
-                    caption=text or None,
+                    caption=final_text,
                     parse_mode=pm,
                     reply_markup=markup
                 )
             elif media_type == "video":
                 await message.answer_video(
                     media_id,
-                    caption=text or None,
+                    caption=final_text,
                     parse_mode=pm,
                     reply_markup=markup
                 )
             elif media_type == "animation":
                 await message.answer_animation(
                     media_id,
-                    caption=text or None,
+                    caption=final_text,
                     parse_mode=pm,
                     reply_markup=markup
                 )
         else:
             await message.answer(
-                text or "📝 *[Пост без текста]*",
-                parse_mode=pm or "Markdown",
+                final_text,
+                parse_mode=pm,
                 reply_markup=markup
             )
     except Exception as e:
-        await message.answer(
-            f"⚠️ **Ошибка предпросмотра**\n\n"
-            f"Не удалось показать превью: {str(e)}\n"
-            f"Проверьте форматирование текста.",
-            parse_mode="Markdown"
-        )
+        print(f"First preview attempt failed: {e}")
+        # Второй попытка без форматирования
+        try:
+            safe_text = re.sub(r'<[^>]+>', '', text) if text else "📝 Пост без текста"
+            
+            if media_id and media_type:
+                if media_type == "photo":
+                    await message.answer_photo(
+                        media_id,
+                        caption=safe_text,
+                        reply_markup=markup
+                    )
+                elif media_type == "video":
+                    await message.answer_video(
+                        media_id,
+                        caption=safe_text,
+                        reply_markup=markup
+                    )
+                elif media_type == "animation":
+                    await message.answer_animation(
+                        media_id,
+                        caption=safe_text,
+                        reply_markup=markup
+                    )
+            else:
+                await message.answer(
+                    safe_text,
+                    reply_markup=markup
+                )
+        except Exception as e2:
+            print(f"Second preview attempt failed: {e2}")
+            # Последняя попытка с минимальным текстом
+            error_msg = f"⚠️ **Ошибка предпросмотра**\n\nНе удалось показать превью поста из-за ошибки форматирования.\n\n**Формат:** {parse_mode or 'не задан'}\n**Ошибка:** {str(e)}"
+            
+            await message.answer(
+                error_msg,
+                parse_mode="Markdown"
+            )
 
 @router.callback_query(F.data == "post_confirm")
 async def handle_post_confirmation(callback: CallbackQuery, state: FSMContext):
@@ -1808,21 +1905,4 @@ async def handle_nav_skip(callback: CallbackQuery, state: FSMContext):
         await state.set_data(data)
         await start_time_step(callback.message, state, lang)
     
-    await callback.answer()
-
-@router.callback_query(F.data == "post_nav_cancel")
-async def handle_nav_cancel(callback: CallbackQuery, state: FSMContext):
-    """Отменить создание поста"""
-    await state.clear()
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-    ])
-    
-    await callback.message.edit_text(
-        "❌ **Создание поста отменено**\n\n"
-        "Все данные удалены.",
-        parse_mode="Markdown",
-        reply_markup=keyboard
-    )
-    await callback.answer()
+    await callback.
