@@ -46,7 +46,7 @@ def get_posts_main_menu_keyboard(lang: str = "ru"):
     ])
 
 def get_post_list_keyboard(posts: list, page: int = 0, posts_per_page: int = 5, list_type: str = "all"):
-    """Создать клавиатуру со списком постов"""
+    """Создать клавиатуру со списком постов с пагинацией"""
     buttons = []
     
     start_idx = page * posts_per_page
@@ -96,6 +96,23 @@ def get_post_list_keyboard(posts: list, page: int = 0, posts_per_page: int = 5, 
     
     if nav_buttons:
         buttons.append(nav_buttons)
+    
+    # Кнопки управления страницами
+    if len(posts) > posts_per_page:
+        total_pages = (len(posts) + posts_per_page - 1) // posts_per_page
+        page_info_text = f"📄 {page + 1}/{total_pages}"
+        
+        page_buttons = []
+        if page > 0:
+            page_buttons.append(InlineKeyboardButton(text="⏪ Первая", callback_data=f"posts_page:{list_type}:0"))
+        if page < total_pages - 1:
+            page_buttons.append(InlineKeyboardButton(text="⏩ Последняя", callback_data=f"posts_page:{list_type}:{total_pages-1}"))
+        
+        if page_buttons:
+            buttons.append(page_buttons)
+        
+        # Добавляем информацию о странице
+        buttons.append([InlineKeyboardButton(text=page_info_text, callback_data="page_info")])
     
     # Кнопка возврата
     buttons.append([InlineKeyboardButton(text="🔙 К меню постов", callback_data="posts_menu")])
@@ -156,7 +173,7 @@ async def callback_posts_menu(callback: CallbackQuery):
 
 @router.callback_query(F.data == "posts_scheduled")
 async def callback_posts_scheduled(callback: CallbackQuery):
-    """Показать запланированные посты"""
+    """Показать запланированные посты с пагинацией"""
     user_id = callback.from_user.id
     user = supabase_db.db.get_user(user_id)
     
@@ -172,39 +189,7 @@ async def callback_posts_scheduled(callback: CallbackQuery):
             await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
         else:
             text = f"⏰ **Запланированные посты** ({len(posts)})\n\n"
-            if len(posts) <= 5:
-                # Показываем все посты если их мало
-                for i, post in enumerate(posts, 1):
-                    try:
-                        time_str = format_time_for_user_simple(post['publish_time'], user)
-                        channel_name = "Канал"
-                        if post.get('channels') and isinstance(post['channels'], dict):
-                            channel_name = post['channels'].get('name', 'Канал')
-                        
-                        post_text = post.get('text', 'Без текста')[:25]
-                        text += f"{i}. **{time_str}** - {channel_name}\n   {post_text}...\n\n"
-                    except Exception as e:
-                        print(f"Error formatting post {post}: {e}")
-                        text += f"{i}. Пост #{post.get('id', '?')}\n\n"
-                
-                # Кнопки для каждого поста
-                buttons = []
-                for post in posts:
-                    channel_name = "Канал"
-                    if post.get('channels') and isinstance(post['channels'], dict):
-                        channel_name = post['channels'].get('name', 'Канал')[:8]
-                    
-                    time_str = format_time_for_user_simple(post['publish_time'], user)
-                    buttons.append([InlineKeyboardButton(
-                        text=f"⏰ #{post['id']} {channel_name} {time_str}", 
-                        callback_data=f"post_view:{post['id']}"
-                    )])
-                
-                buttons.append([InlineKeyboardButton(text="🔙 К меню постов", callback_data="posts_menu")])
-                keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-            else:
-                # Используем пагинацию
-                keyboard = get_post_list_keyboard(posts, 0, 5, "scheduled")
+            keyboard = get_post_list_keyboard(posts, 0, 5, "scheduled")
             
             await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
             
@@ -220,7 +205,7 @@ async def callback_posts_scheduled(callback: CallbackQuery):
 
 @router.callback_query(F.data == "posts_drafts")
 async def callback_posts_drafts(callback: CallbackQuery):
-    """Показать черновики"""
+    """Показать черновики с пагинацией"""
     user_id = callback.from_user.id
     user = supabase_db.db.get_user(user_id)
     
@@ -236,30 +221,7 @@ async def callback_posts_drafts(callback: CallbackQuery):
             await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
         else:
             text = f"📝 **Черновики** ({len(posts)})\n\n"
-            
-            # Кнопки для каждого черновика
-            buttons = []
-            for i, post in enumerate(posts[:10], 1):  # Показываем первые 10
-                channel_name = "Канал"
-                if post.get('channels') and isinstance(post['channels'], dict):
-                    channel_name = post['channels'].get('name', 'Канал')[:8]
-                
-                post_text = post.get('text', 'Без текста')[:15]
-                buttons.append([InlineKeyboardButton(
-                    text=f"📝 #{post['id']} {channel_name} - {post_text}...", 
-                    callback_data=f"post_view:{post['id']}"
-                )])
-                
-                try:
-                    text += f"{i}. **{channel_name}** - {post_text}...\n"
-                except:
-                    text += f"{i}. Пост #{post.get('id', '?')}\n"
-            
-            if len(posts) > 10:
-                text += f"\n... и еще {len(posts) - 10} черновиков"
-            
-            buttons.append([InlineKeyboardButton(text="🔙 К меню постов", callback_data="posts_menu")])
-            keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+            keyboard = get_post_list_keyboard(posts, 0, 5, "drafts")
             
             await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
             
@@ -275,7 +237,7 @@ async def callback_posts_drafts(callback: CallbackQuery):
 
 @router.callback_query(F.data == "posts_published")
 async def callback_posts_published(callback: CallbackQuery):
-    """Показать опубликованные посты"""
+    """Показать опубликованные посты с пагинацией"""
     user_id = callback.from_user.id
     user = supabase_db.db.get_user(user_id)
     
@@ -292,28 +254,9 @@ async def callback_posts_published(callback: CallbackQuery):
             await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
         else:
             text = f"✅ **Опубликованные посты** ({len(published_posts)})\n\n"
-            text += "Последние 10 опубликованных постов:\n\n"
-            
-            # Кнопки для каждого поста
-            buttons = []
-            for i, post in enumerate(published_posts[-10:], 1):  # Последние 10
-                # Получаем канал
-                channel = supabase_db.db.get_channel(post.get('channel_id'))
-                channel_name = channel['name'][:8] if channel else "Канал"
-                
-                post_text = post.get('text', 'Без текста')[:15]
-                buttons.append([InlineKeyboardButton(
-                    text=f"✅ #{post['id']} {channel_name} - {post_text}...", 
-                    callback_data=f"post_view:{post['id']}"
-                )])
-                
-                text += f"{i}. **{channel_name}** - {post_text}...\n"
-            
-            if len(published_posts) > 10:
-                text += f"\n... и еще {len(published_posts) - 10} опубликованных постов"
-            
-            buttons.append([InlineKeyboardButton(text="🔙 К меню постов", callback_data="posts_menu")])
-            keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+            # Сортируем по дате создания (новые сначала)
+            published_posts.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+            keyboard = get_post_list_keyboard(published_posts, 0, 5, "published")
             
             await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
             
@@ -329,7 +272,7 @@ async def callback_posts_published(callback: CallbackQuery):
 
 @router.callback_query(F.data == "posts_all")
 async def callback_posts_all(callback: CallbackQuery):
-    """Показать все посты"""
+    """Показать все посты с пагинацией"""
     user_id = callback.from_user.id
     user = supabase_db.db.get_user(user_id)
     
@@ -348,41 +291,12 @@ async def callback_posts_all(callback: CallbackQuery):
             scheduled = [p for p in posts if not p.get('published') and not p.get('draft') and p.get('publish_time')]
             drafts = [p for p in posts if p.get('draft')]
             published = [p for p in posts if p.get('published')]
+            published.sort(key=lambda x: x.get('created_at', ''), reverse=True)
             
-            sorted_posts = scheduled + drafts + published[-10:]  # Последние 10 опубликованных
+            sorted_posts = scheduled + drafts + published
             
             text = f"📋 **Все посты** ({len(posts)})\n\n"
-            
-            # Кнопки для постов
-            buttons = []
-            for i, post in enumerate(sorted_posts[:15], 1):  # Первые 15
-                # Определяем статус
-                if post.get('published'):
-                    status = "✅"
-                elif post.get('draft'):
-                    status = "📝"
-                elif post.get('publish_time'):
-                    status = "⏰"
-                else:
-                    status = "❓"
-                
-                # Получаем канал
-                channel = supabase_db.db.get_channel(post.get('channel_id'))
-                channel_name = channel['name'][:8] if channel else "Канал"
-                
-                post_text = post.get('text', 'Без текста')[:12]
-                buttons.append([InlineKeyboardButton(
-                    text=f"{status} #{post['id']} {channel_name} - {post_text}...", 
-                    callback_data=f"post_view:{post['id']}"
-                )])
-                
-                text += f"{i}. {status} **{channel_name}** - {post_text}...\n"
-            
-            if len(posts) > 15:
-                text += f"\n... и еще {len(posts) - 15} постов"
-            
-            buttons.append([InlineKeyboardButton(text="🔙 К меню постов", callback_data="posts_menu")])
-            keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+            keyboard = get_post_list_keyboard(sorted_posts, 0, 5, "all")
             
             await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
             
@@ -416,12 +330,19 @@ async def callback_posts_page(callback: CallbackQuery):
         elif list_type == "published":
             all_posts = supabase_db.db.list_posts(user_id=user_id, only_pending=False) or []
             posts = [p for p in all_posts if p.get('published')]
+            posts.sort(key=lambda x: x.get('created_at', ''), reverse=True)
             title = "✅ **Опубликованные посты**"
         else:  # all
             posts = supabase_db.db.list_posts(user_id=user_id, only_pending=False) or []
+            # Сортируем
+            scheduled = [p for p in posts if not p.get('published') and not p.get('draft') and p.get('publish_time')]
+            drafts = [p for p in posts if p.get('draft')]
+            published = [p for p in posts if p.get('published')]
+            published.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+            posts = scheduled + drafts + published
             title = "📋 **Все посты**"
         
-        text = f"{title} ({len(posts)})\n\nСтраница {page + 1}\n\n"
+        text = f"{title} ({len(posts)})\n\n"
         keyboard = get_post_list_keyboard(posts, page, 5, list_type)
         
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
@@ -432,9 +353,14 @@ async def callback_posts_page(callback: CallbackQuery):
     
     await callback.answer()
 
+@router.callback_query(F.data == "page_info")
+async def callback_page_info(callback: CallbackQuery):
+    """Информация о странице (пустой обработчик)"""
+    await callback.answer()
+
 @router.callback_query(F.data.startswith("post_view:"))
 async def callback_post_view(callback: CallbackQuery):
-    """Просмотр конкретного поста"""
+    """Полный просмотр конкретного поста (ИСПРАВЛЕНО)"""
     post_id = int(callback.data.split(":", 1)[1])
     user_id = callback.from_user.id
     
@@ -457,10 +383,10 @@ async def callback_post_view(callback: CallbackQuery):
         # Импортируем функции из view_post
         from view_post import send_post_preview_safe, format_time_for_user
         
-        # Отправляем превью поста
+        # Отправляем превью поста как новое сообщение
         await send_post_preview_safe(callback.message, post)
         
-        # Отправляем информацию с кнопками
+        # Отправляем информацию с кнопками как второе сообщение
         channel = supabase_db.db.get_channel(post['channel_id'])
         channel_name = channel['name'] if channel else 'Неизвестный канал'
         
@@ -498,6 +424,7 @@ async def callback_post_view(callback: CallbackQuery):
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
         
+        # Отправляем как новое сообщение
         await callback.message.answer(info_text, parse_mode="Markdown", reply_markup=keyboard)
         await callback.answer()
         
@@ -513,3 +440,24 @@ async def callback_post_view(callback: CallbackQuery):
     except Exception as e:
         print(f"Error in post view: {e}")
         await callback.answer("❌ Ошибка просмотра поста")
+
+async def send_post_preview_safe(message: Message, post: dict):
+    """Безопасная отправка превью поста"""
+    try:
+        from view_post import send_post_preview
+        await send_post_preview(message, post)
+    except Exception as e:
+        print(f"Error sending post preview: {e}")
+        # Fallback - отправляем основную информацию текстом
+        text = f"📝 **Превью поста #{post['id']}**\n\n"
+        
+        if post.get('text'):
+            text += f"**Текст:** {post['text'][:200]}{'...' if len(post['text']) > 200 else ''}\n"
+        
+        if post.get('media_type'):
+            text += f"**Медиа:** {post['media_type']}\n"
+        
+        if post.get('parse_mode'):
+            text += f"**Формат:** {post['parse_mode']}\n"
+        
+        await message.answer(text, parse_mode="Markdown")
