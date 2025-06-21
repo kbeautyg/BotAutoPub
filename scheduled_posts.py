@@ -1104,31 +1104,40 @@ async def handle_preview_text_input(message: Message, state: FSMContext):
     )
 
 async def send_post_preview(message: Message, data: dict):
-    """Отправить превью поста как он будет выглядеть в канале с правильной обработкой форматирования"""
+    """Отправить превью поста как он будет выглядеть в канале с улучшенной обработкой форматирования"""
     text = data.get("text", "")
     media_id = data.get("media_file_id")
     media_type = data.get("media_type")
     parse_mode = data.get("parse_mode")
     buttons = data.get("buttons")
     
-    # Определяем parse_mode
+    # Определяем parse_mode для Telegram
     pm = None
     if parse_mode:
         if parse_mode.lower() == "markdown":
-            pm = "Markdown"
+            pm = "MarkdownV2"  # Используем MarkdownV2 для лучшей совместимости
         elif parse_mode.lower() == "html":
             pm = "HTML"
     
     # Очищаем и подготавливаем текст для формата
+    cleaned_text = text
     if text and pm:
         try:
-            cleaned_text = clean_text_for_format(text, pm)
+            cleaned_text = clean_text_for_format(text, pm.replace("V2", ""))
         except Exception as e:
-            print(f"Error cleaning text for preview: {e}")
-            cleaned_text = text
-            pm = None  # Отключаем форматирование при ошибке
-    else:
-        cleaned_text = text
+            print(f"Error cleaning text for preview with {pm}: {e}")
+            # Если ошибка в Markdown, пробуем HTML
+            if pm == "MarkdownV2":
+                try:
+                    cleaned_text = clean_text_for_format(text, "HTML")
+                    pm = "HTML"
+                except Exception as e2:
+                    print(f"Error with HTML fallback: {e2}")
+                    cleaned_text = clean_text_for_format(text, None)
+                    pm = None
+            else:
+                cleaned_text = clean_text_for_format(text, None)
+                pm = None
     
     # Подготовка кнопок
     markup = None
@@ -1145,78 +1154,66 @@ async def send_post_preview(message: Message, data: dict):
             pass
     
     # Fallback text если основной пустой
-    final_text = cleaned_text or "📝 *Пост без текста*"
-    fallback_parse_mode = pm or "Markdown"
+    final_text = cleaned_text or "📝 Пост без текста"
     
-    # Отправка превью
-    try:
-        if media_id and media_type:
-            if media_type == "photo":
-                await message.answer_photo(
-                    media_id,
-                    caption=final_text,
-                    parse_mode=pm,
-                    reply_markup=markup
-                )
-            elif media_type == "video":
-                await message.answer_video(
-                    media_id,
-                    caption=final_text,
-                    parse_mode=pm,
-                    reply_markup=markup
-                )
-            elif media_type == "animation":
-                await message.answer_animation(
-                    media_id,
-                    caption=final_text,
-                    parse_mode=pm,
-                    reply_markup=markup
-                )
-        else:
-            await message.answer(
-                final_text,
-                parse_mode=pm,
-                reply_markup=markup
-            )
-    except Exception as e:
-        print(f"First preview attempt failed: {e}")
-        # Второй попытка без форматирования
+    # Отправка превью с множественными попытками
+    attempts = [
+        (pm, final_text),  # Первая попытка с оригинальным форматом
+        ("HTML", clean_text_for_format(text, "HTML") if text else "📝 Пост без текста"),  # HTML fallback
+        (None, clean_text_for_format(text, None) if text else "📝 Пост без текста"),  # Без форматирования
+        (None, "📝 Пост без текста")  # Минимальный fallback
+    ]
+    
+    last_error = None
+    
+    for attempt_parse_mode, attempt_text in attempts:
         try:
-            safe_text = re.sub(r'<[^>]+>', '', text) if text else "📝 Пост без текста"
-            
             if media_id and media_type:
                 if media_type == "photo":
                     await message.answer_photo(
                         media_id,
-                        caption=safe_text,
+                        caption=attempt_text,
+                        parse_mode=attempt_parse_mode,
                         reply_markup=markup
                     )
                 elif media_type == "video":
                     await message.answer_video(
                         media_id,
-                        caption=safe_text,
+                        caption=attempt_text,
+                        parse_mode=attempt_parse_mode,
                         reply_markup=markup
                     )
                 elif media_type == "animation":
                     await message.answer_animation(
                         media_id,
-                        caption=safe_text,
+                        caption=attempt_text,
+                        parse_mode=attempt_parse_mode,
                         reply_markup=markup
                     )
             else:
                 await message.answer(
-                    safe_text,
+                    attempt_text,
+                    parse_mode=attempt_parse_mode,
                     reply_markup=markup
                 )
-        except Exception as e2:
-            print(f"Second preview attempt failed: {e2}")
-            # Последняя попытка с минимальным текстом
-            error_msg = f"⚠️ **Ошибка предпросмотра**\n\nНе удалось показать превью поста из-за ошибки форматирования.\n\n**Формат:** {parse_mode or 'не задан'}\n**Ошибка:** {str(e)}"
+            # Если дошли сюда, значит отправка прошла успешно
+            return
             
-            await message.answer(
-                error_msg,
-                parse_mode="Markdown"
-            )
+        except Exception as e:
+            last_error = e
+            print(f"Preview attempt with parse_mode={attempt_parse_mode} failed: {e}")
+            continue
+    
+    # Если все попытки провалились, отправляем сообщение об ошибке
+    error_msg = (f"⚠️ **Ошибка предпросмотра**\n\n"
+                f"Не удалось показать превью поста из-за ошибки форматирования.\n\n"
+                f"**Формат:** {parse_mode or 'не задан'}\n"
+                f"**Ошибка:** {str(last_error)[:100]}...")
+    
+    try:
+        await message.answer(error_msg, parse_mode="Markdown")
+    except Exception:
+        await message.answer("⚠️ Ошибка предпросмотра поста")
 
 @router.callback_query(F.data == "post_confirm")
 async def handle_post_confirmation(callback: CallbackQuery, state: FSMContext):
