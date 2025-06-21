@@ -56,31 +56,64 @@ def format_time_for_user(time_str: str, user: dict) -> str:
         return str(time_str)
 
 def clean_text_for_format(text: str, parse_mode: str) -> str:
-    """Очистить и подготовить текст для определенного формата"""
+    """Очистить и подготовить текст для определенного формата с поддержкой спецтегов"""
     if not text:
         return text
     
-    if parse_mode == "Markdown":
-        # Экранируем специальные символы Markdown
-        # Сначала убираем HTML-теги если они есть
-        text = re.sub(r'<[^>]+>', '', text)
+    # Сначала заменяем специальные теги форматирования на соответствующие для выбранного режима
+    if parse_mode == "HTML":
+        # Заменяем наши теги на HTML
+        text = text.replace('[b]', '<b>').replace('[/b]', '</b>')
+        text = text.replace('[i]', '<i>').replace('[/i]', '</i>')
+        text = text.replace('[u]', '<u>').replace('[/u]', '</u>')
+        text = text.replace('[s]', '<s>').replace('[/s]', '</s>')
+        text = text.replace('[code]', '<code>').replace('[/code]', '</code>')
+        text = text.replace('[pre]', '<pre>').replace('[/pre]', '</pre>')
         
-        # Экранируем специальные символы Markdown v2
-        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        # Обрабатываем ссылки [url=link]text[/url] -> <a href="link">text</a>
+        text = re.sub(r'\[url=([^\]]+)\]([^\[]+)\[/url\]', r'<a href="\1">\2</a>', text)
+        
+        # Экранируем оставшиеся HTML символы, но сохраняем наши теги
+        preserved_tags = []
+        tag_pattern = r'<(/?)([bius]|code|pre|a[^>]*)>'
+        
+        def preserve_tag(match):
+            preserved_tags.append(match.group(0))
+            return f"__PRESERVED_TAG_{len(preserved_tags)-1}__"
+        
+        text = re.sub(tag_pattern, preserve_tag, text)
+        text = html.escape(text)
+        
+        for i, tag in enumerate(preserved_tags):
+            text = text.replace(f"__PRESERVED_TAG_{i}__", tag)
+        
+        return text
+    
+    elif parse_mode == "Markdown":
+        # Заменяем наши теги на Markdown
+        text = text.replace('[b]', '*').replace('[/b]', '*')
+        text = text.replace('[i]', '_').replace('[/i]', '_')
+        text = text.replace('[u]', '__').replace('[/u]', '__')  # Markdown MarkdownV2
+        text = text.replace('[s]', '~~').replace('[/s]', '~~')
+        text = text.replace('[code]', '`').replace('[/code]', '`')
+        text = text.replace('[pre]', '```').replace('[/pre]', '```')
+        
+        # Обрабатываем ссылки [url=link]text[/url] -> [text](link)
+        text = re.sub(r'\[url=([^\]]+)\]([^\[]+)\[/url\]', r'[\2](\1)', text)
+        
+        # Экранируем специальные символы Markdown (кроме наших)
+        special_chars = ['\\', '[', ']', '(', ')', '~', '>', '#', '+', '-', '=', '|', '.', '!']
         for char in special_chars:
+            if char not in text:  # Проверяем, чтобы не сломать уже обработанные теги
+                continue
             text = text.replace(char, '\\' + char)
         
         return text
     
-    elif parse_mode == "HTML":
-        # Экранируем HTML символы если нет тегов
-        if not re.search(r'<[^>]+>', text):
-            text = html.escape(text)
-        return text
-    
     else:
         # Обычный текст - убираем все теги и специальные символы
-        text = re.sub(r'<[^>]+>', '', text)
+        text = re.sub(r'\[[^\]]*\]', '', text)  # Убираем наши теги
+        text = re.sub(r'<[^>]+>', '', text)     # Убираем HTML теги
         return text
 
 def get_post_management_keyboard(post_id: int, is_published: bool = False) -> InlineKeyboardMarkup:
@@ -272,7 +305,7 @@ async def send_post_preview(message: Message, post: dict, channel: dict = None):
         print(f"First attempt failed: {e}")
         # Второй попытка без форматирования
         try:
-            safe_text = re.sub(r'<[^>]+>', '', text) if text else "📝 Пост без текста"
+            safe_text = clean_text_for_format(text, None) if text else "📝 Пост без текста"
             
             if media_id and media_type:
                 if media_type.lower() == "photo":
@@ -325,6 +358,29 @@ def format_interval(seconds: int) -> str:
     else:
         minutes = seconds // 60
         return f"{minutes} мин." if minutes != 1 else "минуту"
+
+# Функция для безопасной отправки превью (используется в list_posts)
+async def send_post_preview_safe(message: Message, post: dict):
+    """Безопасная отправка превью поста (используется из других модулей)"""
+    try:
+        await send_post_preview(message, post)
+    except Exception as e:
+        print(f"Error sending post preview: {e}")
+        # Fallback - отправляем основную информацию текстом
+        text = f"📝 **Превью поста #{post.get('id', '?')}**\n\n"
+        
+        if post.get('text'):
+            # Убираем теги форматирования для превью
+            clean_text = clean_text_for_format(post['text'], None)
+            text += f"**Текст:** {clean_text[:200]}{'...' if len(clean_text) > 200 else ''}\n"
+        
+        if post.get('media_type'):
+            text += f"**Медиа:** {post['media_type']}\n"
+        
+        if post.get('parse_mode'):
+            text += f"**Формат:** {post['parse_mode']}\n"
+        
+        await message.answer(text, parse_mode="Markdown")
 
 @router.message(Command("publish"))
 async def cmd_publish_now(message: Message):
