@@ -418,187 +418,6 @@ async def start_media_step(message: Message, state: FSMContext, lang: str):
     keyboard = get_navigation_keyboard("step_media", lang, can_skip=True)
     await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
 
-# Добавляем обработчик для предложения редактирования в scheduled_posts.py
-@router.callback_query(F.data.startswith("edit_offer_"))
-async def handle_edit_offer_response(callback: CallbackQuery, state: FSMContext):
-    """Обработка ответа на предложение редактирования"""
-    action = callback.data.split("_")[-1]  # accept или decline
-    
-    # Извлекаем post_id из callback_data предыдущего сообщения
-    try:
-        # Ищем post_id в тексте сообщения
-        message_text = callback.message.text
-        import re
-        post_id_match = re.search(r'#(\d+)', message_text)
-        if post_id_match:
-            post_id = int(post_id_match.group(1))
-        else:
-            await callback.answer()
-
-@router.callback_query(F.data == "post_nav_cancel")
-async def handle_nav_cancel(callback: CallbackQuery, state: FSMContext):
-    """Отменить создание поста"""
-    await state.clear()
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-    ])
-    
-    await callback.message.edit_text(
-        "❌ **Создание поста отменено**\n\n"
-        "Все данные удалены.",
-        parse_mode="Markdown",
-        reply_markup=keyboard
-    )
-    await callback.answer()answer("❌ Не удалось определить ID поста")
-            return
-    except:
-        await callback.answer("❌ Ошибка обработки")
-        return
-    
-    if action == "accept":
-        # Пользователь хочет редактировать пост
-        user_id = callback.from_user.id
-        user = supabase_db.db.get_user(user_id)
-        
-        # Получаем пост
-        post = supabase_db.db.get_post(post_id)
-        if not post:
-            await callback.answer("❌ Пост не найден!")
-            return
-        
-        # Проверяем доступ через канал
-        if not supabase_db.db.is_channel_admin(post.get("channel_id"), user_id):
-            await callback.answer("❌ У вас нет доступа к этому посту!")
-            return
-        
-        if post.get("published"):
-            await callback.answer("❌ Нельзя редактировать опубликованный пост!")
-            return
-        
-        # Показываем главное меню редактирования
-        try:
-            from edit_post import show_edit_main_menu
-            await show_edit_main_menu(callback.message, post_id, post, user, user.get("language", "ru"))
-            await callback.answer()
-        except ImportError:
-            # Fallback на старый метод
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_direct:{post_id}")],
-                [InlineKeyboardButton(text="👀 Просмотр", callback_data=f"post_full_view:{post_id}")],
-                [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")]
-            ])
-            
-            await callback.message.edit_text(
-                f"✏️ **Редактирование поста #{post_id}**\n\n"
-                f"Выберите действие:",
-                parse_mode="Markdown",
-                reply_markup=keyboard
-            )
-            await callback.answer()
-    
-    elif action == "decline":
-        # Пользователь не хочет редактировать
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_full_view:{post_id}")],
-            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-        ])
-        
-        await callback.message.edit_text(
-            f"✅ **Отлично!**\n\n"
-            f"Пост #{post_id} готов к публикации в запланированное время.",
-            parse_mode="Markdown",
-            reply_markup=keyboard
-        )
-        await callback.answer()
-
-@router.callback_query(F.data == "edit_offer_accept")
-async def handle_edit_offer_accept(callback: CallbackQuery, state: FSMContext):
-    """Принятие предложения редактирования"""
-    # Извлекаем post_id из текста сообщения
-    try:
-        message_text = callback.message.text
-        import re
-        post_id_match = re.search(r'#(\d+)', message_text)
-        if post_id_match:
-            post_id = int(post_id_match.group(1))
-        else:
-            await callback.answer("❌ Не удалось определить ID поста")
-            return
-    except:
-        await callback.answer("❌ Ошибка обработки")
-        return
-    
-    user_id = callback.from_user.id
-    user = supabase_db.db.get_user(user_id)
-    
-    # Получаем пост
-    post = supabase_db.db.get_post(post_id)
-    if not post:
-        await callback.answer("❌ Пост не найден!")
-        return
-    
-    # Проверяем доступ через канал
-    if not supabase_db.db.is_channel_admin(post.get("channel_id"), user_id):
-        await callback.answer("❌ У вас нет доступа к этому посту!")
-        return
-    
-    if post.get("published"):
-        await callback.answer("❌ Нельзя редактировать опубликованный пост!")
-        return
-    
-    # Показываем главное меню редактирования из нового модуля
-    try:
-        # Импортируем функцию из нового модуля редактирования
-        from edit_post import show_edit_main_menu
-        await show_edit_main_menu(callback.message, post_id, post, user, user.get("language", "ru"))
-        await callback.answer()
-    except ImportError:
-        # Fallback если новый модуль недоступен
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_direct:{post_id}")],
-            [InlineKeyboardButton(text="👀 Просмотр", callback_data=f"post_full_view:{post_id}")],
-            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")]
-        ])
-        
-        await callback.message.edit_text(
-            f"✏️ **Редактирование поста #{post_id}**\n\n"
-            f"Используйте команду `/edit {post_id}` для редактирования.",
-            parse_mode="Markdown",
-            reply_markup=keyboard
-        )
-        await callback.answer("Используйте команду /edit " + str(post_id))
-
-@router.callback_query(F.data == "edit_offer_decline")
-async def handle_edit_offer_decline(callback: CallbackQuery):
-    """Отклонение предложения редактирования"""
-    # Извлекаем post_id из текста сообщения
-    try:
-        message_text = callback.message.text
-        import re
-        post_id_match = re.search(r'#(\d+)', message_text)
-        if post_id_match:
-            post_id = int(post_id_match.group(1))
-        else:
-            post_id = 0
-    except:
-        post_id = 0
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_full_view:{post_id}" if post_id else "posts_menu")],
-        [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-    ])
-    
-    await callback.message.edit_text(
-        "✅ **Отлично!**\n\n"
-        "Пост готов к публикации в запланированное время.",
-        parse_mode="Markdown",
-        reply_markup=keyboard
-    )
-    await callback.answer()
-
 @router.message(PostCreationFlow.step_media, F.text | F.photo | F.video | F.animation)
 async def handle_media_input(message: Message, state: FSMContext):
     """Обработка медиа или команд"""
@@ -1550,12 +1369,25 @@ async def handle_post_confirmation_text(message: Message, state: FSMContext, is_
         
         await state.clear()
 
-# Обработчик для прямого редактирования поста
-@router.callback_query(F.data.startswith("post_edit_direct:"))
-async def handle_post_edit_direct(callback: CallbackQuery, state: FSMContext):
-    """Прямое редактирование поста без запуска команды"""
-    post_id = int(callback.data.split(":", 1)[1])
+@router.callback_query(F.data == "edit_offer_accept")
+async def handle_edit_offer_accept(callback: CallbackQuery, state: FSMContext):
+    """Принятие предложения редактирования"""
+    # Извлекаем post_id из текста сообщения
+    try:
+        message_text = callback.message.text
+        import re
+        post_id_match = re.search(r'#(\d+)', message_text)
+        if post_id_match:
+            post_id = int(post_id_match.group(1))
+        else:
+            await callback.answer("❌ Не удалось определить ID поста")
+            return
+    except:
+        await callback.answer("❌ Ошибка обработки")
+        return
+    
     user_id = callback.from_user.id
+    user = supabase_db.db.get_user(user_id)
     
     # Получаем пост
     post = supabase_db.db.get_post(post_id)
@@ -1572,30 +1404,56 @@ async def handle_post_edit_direct(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Нельзя редактировать опубликованный пост!")
         return
     
-    # Инициализируем данные для редактирования
-    user = supabase_db.db.get_user(user_id)
-    
-    await state.set_data({
-        "post_id": post_id,
-        "original_post": post,
-        "user_settings": user,
-        "current_step": "text",
-        "changes": {}
-    })
-    
-    # Импортируем функцию из edit_post
+    # Показываем главное меню редактирования из нового модуля
     try:
-        from edit_post import start_edit_text_step
-        await start_edit_text_step(callback.message, state, user.get("language", "ru"))
+        # Импортируем функцию из нового модуля редактирования
+        from edit_post import show_edit_main_menu
+        await show_edit_main_menu(callback.message, post_id, post, user, user.get("language", "ru"))
         await callback.answer()
     except ImportError:
-        # Fallback если модуль недоступен
+        # Fallback если новый модуль недоступен
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"post_edit_direct:{post_id}")],
+            [InlineKeyboardButton(text="👀 Просмотр", callback_data=f"post_full_view:{post_id}")],
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")]
+        ])
+        
         await callback.message.edit_text(
             f"✏️ **Редактирование поста #{post_id}**\n\n"
-            f"Используйте команду `/edit {post_id}` для редактирования поста.",
-            parse_mode="Markdown"
+            f"Используйте команду `/edit {post_id}` для редактирования.",
+            parse_mode="Markdown",
+            reply_markup=keyboard
         )
         await callback.answer("Используйте команду /edit " + str(post_id))
+
+@router.callback_query(F.data == "edit_offer_decline")
+async def handle_edit_offer_decline(callback: CallbackQuery):
+    """Отклонение предложения редактирования"""
+    # Извлекаем post_id из текста сообщения
+    try:
+        message_text = callback.message.text
+        import re
+        post_id_match = re.search(r'#(\d+)', message_text)
+        if post_id_match:
+            post_id = int(post_id_match.group(1))
+        else:
+            post_id = 0
+    except:
+        post_id = 0
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_full_view:{post_id}" if post_id else "posts_menu")],
+        [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
+    
+    await callback.message.edit_text(
+        "✅ **Отлично!**\n\n"
+        "Пост готов к публикации в запланированное время.",
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+    await callback.answer()
 
 @router.callback_query(F.data == "post_edit_menu")
 async def handle_edit_menu(callback: CallbackQuery, state: FSMContext):
@@ -1632,168 +1490,6 @@ async def handle_edit_menu_text(message: Message, state: FSMContext, is_callback
     else:
         await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
 
-# Обработчик текстовых команд редактирования (только в режиме редактирования)
-async def edit_commands_filter(message):
-    """Фильтр для команд редактирования"""
-    if not message.text:
-        return False
-    return message.text.lower().strip() in ["text", "media", "format", "buttons", "time", "channel"]
-
-@router.message(PostCreationFlow.step_preview, F.text, edit_commands_filter)
-async def handle_edit_field_text_specific(message: Message, state: FSMContext):
-    """Обработка текстовых команд редактирования"""
-    data = await state.get_data()
-    if not data.get("editing_mode"):
-        return
-    
-    field = message.text.lower().strip()
-    await handle_edit_field_logic(message, state, field)
-
-@router.callback_query(F.data.startswith("edit_field:"))
-async def handle_edit_field(callback: CallbackQuery, state: FSMContext):
-    """Редактирование конкретного поля через кнопку"""
-    field = callback.data.split(":", 1)[1]
-    await handle_edit_field_logic(callback.message, state, field, is_callback=True)
-    await callback.answer()
-
-async def handle_edit_field_logic(message: Message, state: FSMContext, field: str, is_callback: bool = False):
-    """Логика редактирования поля"""
-    user = supabase_db.db.get_user(message.from_user.id)
-    lang = user.get("language", "ru") if user else "ru"
-    
-    data = await state.get_data()
-    data["editing_field"] = field
-    data["editing_mode"] = False
-    await state.set_data(data)
-    
-    if field == "text":
-        await state.set_state(PostCreationFlow.step_text)
-        current_text = data.get("text", "Нет текста")
-        text = (
-            f"📝 **Редактирование текста**\n\n"
-            f"Текущий текст:\n{current_text[:200]}{'...' if len(current_text) > 200 else ''}\n\n"
-            f"Отправьте новый текст или команду:\n"
-            f"• `skip` - оставить текущий\n"
-            f"• `cancel` - отменить редактирование"
-        )
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⏭️ Пропустить", callback_data="post_nav_skip")],
-            [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
-        ])
-        
-        if is_callback:
-            await message.edit_text(text, parse_mode="Markdown", reply_markup=keyboard)
-        else:
-            await message.answer(text, parse_mode="Markdown", reply_markup=keyboard)
-    
-    elif field == "media":
-        await state.set_state(PostCreationFlow.step_media)
-        current_media = "есть" if data.get("media_file_id") else "нет"
-        text = (
-            f"🖼 **Редактирование медиа**\n\n"
-            f"Текущее медиа: {current_media}\n\n"
-            f"Отправьте новое фото/видео/GIF или команду:\n"
-            f"• `skip` - оставить текущее\n"
-            f"• `cancel` - отменить редактирование"
-        )
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⏭️ Пропустить", callback_data="post_nav_skip")],
-            [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
-        ])
-        
-        if is_callback:
-            await message.edit_text(text, parse_mode="Markdown", reply_markup=keyboard)
-        else:
-            await message.answer(text, parse_mode="Markdown", reply_markup=keyboard)
-    
-    elif field == "format":
-        text = (
-            f"🎨 **Редактирование формата**\n\n"
-            f"Текущий формат: {data.get('parse_mode', 'HTML')}\n\n"
-            f"Выберите новый формат или команду:\n"
-            f"• `html` - HTML формат\n"
-            f"• `markdown` - Markdown формат\n"
-            f"• `none` - без форматирования\n"
-            f"• `skip` - оставить текущий\n"
-            f"• `cancel` - отменить"
-        )
-        
-        keyboard = get_format_keyboard(lang)
-        
-        if is_callback:
-            await message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
-        else:
-            await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
-    
-    elif field == "buttons":
-        await state.set_state(PostCreationFlow.step_buttons)
-        current_buttons = data.get("buttons", [])
-        buttons_text = "\n".join([f"• {b['text']} | {b['url']}" for b in current_buttons]) if current_buttons else "Нет кнопок"
-        text = (
-            f"🔘 **Редактирование кнопок**\n\n"
-            f"Текущие кнопки:\n{buttons_text}\n\n"
-            f"Отправьте новые кнопки в формате 'Текст | URL' или команду:\n"
-            f"• `skip` - оставить текущие\n"
-            f"• `cancel` - отменить редактирование"
-        )
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⏭️ Пропустить", callback_data="post_nav_skip")],
-            [InlineKeyboardButton(text="❌ Отменить", callback_data="post_nav_cancel")]
-        ])
-        
-        if is_callback:
-            await message.edit_text(text, parse_mode="Markdown", reply_markup=keyboard)
-        else:
-            await message.answer(text, parse_mode="Markdown", reply_markup=keyboard)
-    
-    elif field == "time":
-        text = (
-            f"⏰ **Редактирование времени**\n\n"
-            f"Когда опубликовать пост?\n\n"
-            f"Команды:\n"
-            f"• `now` - опубликовать сейчас\n"
-            f"• `draft` - сохранить как черновик\n"
-            f"• Дата и время: `2024-12-25 15:30`\n"
-            f"• `skip` - оставить текущее время\n"
-            f"• `cancel` - отменить"
-        )
-        
-        keyboard = get_time_options_keyboard(lang)
-        
-        if is_callback:
-            await message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
-        else:
-            await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
-    
-    elif field == "channel":
-        user_id = data["user_id"]
-        channels = supabase_db.db.get_user_channels(user_id)
-        text = (
-            f"📺 **Редактирование канала**\n\n"
-            f"Выберите новый канал:\n\n"
-        )
-        
-        for i, channel in enumerate(channels, 1):
-            admin_status = "✅" if channel.get('is_admin_verified') else "❓"
-            text += f"{i}. {admin_status} {channel['name']}\n"
-        
-        text += (
-            f"\nКоманды:\n"
-            f"• Номер канала (например: `1`)\n"
-            f"• `skip` - оставить текущий канал\n"
-            f"• `cancel` - отменить"
-        )
-        
-        keyboard = get_channels_keyboard(channels, lang)
-        
-        if is_callback:
-            await message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
-        else:
-            await message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
-
 @router.callback_query(F.data == "post_preview")
 async def handle_back_to_preview(callback: CallbackQuery, state: FSMContext):
     """Вернуться к предпросмотру после редактирования"""
@@ -1811,7 +1507,6 @@ async def handle_back_to_preview(callback: CallbackQuery, state: FSMContext):
     await start_preview_step(callback.message, state, lang)
     await callback.answer()
 
-# Обработчики навигации
 @router.callback_query(F.data == "post_nav_back")
 async def handle_nav_back(callback: CallbackQuery, state: FSMContext):
     """Возврат к предыдущему шагу"""
@@ -1905,4 +1600,21 @@ async def handle_nav_skip(callback: CallbackQuery, state: FSMContext):
         await state.set_data(data)
         await start_time_step(callback.message, state, lang)
     
-    await callback.
+    await callback.answer()
+
+@router.callback_query(F.data == "post_nav_cancel")
+async def handle_nav_cancel(callback: CallbackQuery, state: FSMContext):
+    """Отменить создание поста"""
+    await state.clear()
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
+    
+    await callback.message.edit_text(
+        "❌ **Создание поста отменено**\n\n"
+        "Все данные удалены.",
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+    await callback.answer()
