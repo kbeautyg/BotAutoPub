@@ -41,30 +41,8 @@ async def publish_post_immediately(bot: Bot, post_id: int) -> bool:
         if not post or post.get("published") or post.get("draft"):
             return False
         
-        # Проверяем, что время публикации уже наступило
-        if post.get("publish_time"):
-            from datetime import datetime
-            from zoneinfo import ZoneInfo
-            
-            publish_time_str = post["publish_time"]
-            if isinstance(publish_time_str, str):
-                if publish_time_str.endswith('Z'):
-                    publish_time_str = publish_time_str[:-1] + '+00:00'
-                pub_dt = datetime.fromisoformat(publish_time_str)
-            else:
-                pub_dt = publish_time_str
-            
-            if pub_dt.tzinfo is None:
-                pub_dt = pub_dt.replace(tzinfo=ZoneInfo("UTC"))
-            
-            now = datetime.now(ZoneInfo("UTC"))
-            if pub_dt > now:
-                return False  # Еще не время публиковать
-        
-        # Используем тот же код, что и в планировщике
+        # Определяем chat_id канала
         chat_id = None
-        
-        # Determine channel chat_id
         if post.get("chat_id"):
             chat_id = post["chat_id"]
         else:
@@ -114,8 +92,8 @@ async def publish_post_immediately(bot: Bot, post_id: int) -> bool:
         elif parse_mode_field and parse_mode_field.lower() == "html":
             parse_mode = "HTML"
         
-        # Публикуем пост (с обработкой длинных caption)
-        def prepare_media_text(text: str, max_caption_length: int = 1024) -> tuple[str, str]:
+        # Функция для подготовки текста с обрезкой caption
+        def prepare_media_text(text: str, max_caption_length: int = 1000) -> tuple[str, str]:
             if not text:
                 return "", ""
             
@@ -134,6 +112,7 @@ async def publish_post_immediately(bot: Bot, post_id: int) -> bool:
             
             return caption_text, additional_text
         
+        # Публикуем пост
         if media_id and media_type:
             caption_text, additional_text = prepare_media_text(text)
             
@@ -219,32 +198,26 @@ async def error_handler(event, exception):
     return True  # Обработано
 
 # Include routers from command modules
-# Основные модули
 import start
 import help
-
-# Основные функциональные модули
-import main_menu as main_menu  # Используем исправленную версию
+import main_menu as main_menu
 import channels
-import scheduled_posts as create  # Используем исправленную версию
-import list_posts  # Импортируем list_posts для работы со списками
+import scheduled_posts as create
+import list_posts
 import settings_improved
 import view_post
-
-# Улучшенные модули
-import edit_post  # Используем новый улучшенный редактор
+import edit_post
 
 # Регистрируем роутеры в правильном порядке
-# Важно: сначала регистрируем модули с командами, потом с общими обработчиками
 dp.include_router(start.router)
 dp.include_router(help.router)
 dp.include_router(channels.router)
-dp.include_router(create.router)  # Улучшенная версия создания постов
+dp.include_router(create.router)
 dp.include_router(view_post.router)
-dp.include_router(list_posts.router)  # Добавляем router для списка постов
+dp.include_router(list_posts.router)
 dp.include_router(settings_improved.router)
-dp.include_router(edit_post.router)  # Новый улучшенный редактор
-dp.include_router(main_menu.router)  # В конце, чтобы не перехватывал команды
+dp.include_router(edit_post.router)
+dp.include_router(main_menu.router)
 
 # Улучшенные глобальные обработчики для редактирования
 @dp.callback_query(F.data.startswith("edit_field:"))
@@ -283,9 +256,6 @@ async def callback_edit_field_global(callback: CallbackQuery, state: FSMContext)
                 await callback.message.edit_text(f"Используйте команду `/edit {post_id}` для редактирования.")
             
             await callback.answer()
-
-if __name__ == "__main__":
-    asyncio.run(main())
         else:
             # Обычное редактирование поля - передаем в edit_post модуль
             try:
@@ -394,7 +364,6 @@ async def callback_edit_post_global(callback: CallbackQuery):
             [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")]
         ])
         
-        # Отправляем сообщение о запуске редактирования
         await callback.message.edit_text(
             f"✏️ **Редактирование поста #{post_id}**\n\n"
             f"Выберите действие:",
@@ -407,7 +376,6 @@ async def callback_edit_post_global(callback: CallbackQuery):
         print(f"Error in callback_edit_post_global: {e}")
         await callback.answer("❌ Произошла ошибка")
 
-# Также нужно обновить обработчик post_edit_direct для использования нового интерфейса
 @dp.callback_query(F.data.startswith("post_edit_direct:"))
 async def callback_edit_post_global_updated(callback: CallbackQuery, state: FSMContext):
     """Глобальный обработчик команды редактирования поста (обновленный)"""
@@ -481,7 +449,7 @@ async def callback_publish_post_global(callback: CallbackQuery):
             await callback.answer("У вас нет доступа к этому посту!")
             return
         
-        # Обновляем время публикации на текущее
+        # Обновляем время публикации на текущее (ИСПРАВЛЕНО - конвертируем в строку)
         now = datetime.now(ZoneInfo("UTC"))
         supabase_db.db.update_post(post_id, {
             "publish_time": now.isoformat(),  # Конвертируем в строку!
@@ -489,7 +457,7 @@ async def callback_publish_post_global(callback: CallbackQuery):
         })
         
         # Пытаемся опубликовать немедленно
-        published = await publish_post_immediately(callback.bot, post_id)
+        published = await publish_post_immediately(bot, post_id)
         
         # Создаем клавиатуру с действиями
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -640,4 +608,158 @@ async def callback_full_view_post_global(callback: CallbackQuery):
             channel = supabase_db.db.get_channel(post['channel_id'])
             channel_name = channel['name'] if channel else 'Неизвестный канал'
             
-            info_text = f"👀
+            info_text = f"👀 **Полный просмотр поста #{post_id}**\n\n"
+            info_text += f"📺 **Канал:** {channel_name}\n"
+            
+            if post.get('published'):
+                info_text += "✅ **Статус:** Опубликован\n"
+            elif post.get('draft'):
+                info_text += "📝 **Статус:** Черновик\n"
+            elif post.get('publish_time'):
+                if user:
+                    formatted_time = format_time_for_user(post['publish_time'], user)
+                    info_text += f"⏰ **Запланировано:** {formatted_time}\n"
+                else:
+                    info_text += f"⏰ **Запланировано:** {post['publish_time']}\n"
+            
+            # Создаем клавиатуру действий
+            buttons = []
+            
+            if not post.get('published'):
+                buttons.append([
+                    InlineKeyboardButton(text="📅 Перенести", callback_data=f"post_reschedule_cmd:{post_id}"),
+                    InlineKeyboardButton(text="🗑 Удалить", callback_data=f"post_delete_cmd:{post_id}")
+                ])
+            
+            buttons.append([
+                InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu"),
+                InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+            ])
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+            
+            await callback.message.answer(info_text, parse_mode="Markdown", reply_markup=keyboard)
+            await callback.answer()
+        except ImportError:
+            # Fallback если модуль view_post недоступен
+            info_text = f"👀 **Пост #{post_id}**\n\nИспользуйте команду `/view {post_id}` для полного просмотра."
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ])
+            await callback.message.answer(info_text, parse_mode="Markdown", reply_markup=keyboard)
+            await callback.answer()
+    except Exception as e:
+        print(f"Error in callback_full_view_post_global: {e}")
+        await callback.answer("❌ Произошла ошибка")
+
+# Обработчик для callback кнопки "Создать пост" из меню (обновленный)
+@dp.callback_query(F.data == "menu_create_post_direct")
+async def callback_create_post_direct_updated(callback: CallbackQuery):
+    """Прямое создание поста через callback из меню (обновленный)"""
+    try:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📝 Пошаговое создание", callback_data="create_step_by_step")],
+            [InlineKeyboardButton(text="🚀 Быстрое создание", callback_data="create_quick_help")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        
+        await callback.message.edit_text(
+            "📝 **Создание нового поста**\n\n"
+            "Выберите способ создания поста:",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+        await callback.answer()
+    except Exception as e:
+        print(f"Error in callback_create_post_direct_updated: {e}")
+        await callback.answer("❌ Произошла ошибка")
+
+@dp.callback_query(F.data == "create_step_by_step")
+async def callback_create_step_by_step(callback: CallbackQuery):
+    """Пошаговое создание поста"""
+    try:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        
+        await callback.message.edit_text(
+            "📝 **Пошаговое создание поста**\n\n"
+            "Используйте команду `/create` для создания поста с пошаговым мастером.",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+        await callback.answer("Используйте команду /create")
+    except Exception as e:
+        print(f"Error in callback_create_step_by_step: {e}")
+        await callback.answer("❌ Произошла ошибка")
+
+@dp.callback_query(F.data == "create_quick_help")
+async def callback_create_quick_help(callback: CallbackQuery):
+    """Помощь по быстрому созданию"""
+    try:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📝 Пошаговое создание", callback_data="create_step_by_step")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        
+        await callback.message.edit_text(
+            "🚀 **Быстрое создание поста**\n\n"
+            "Используйте команду `/quickpost` для быстрого создания:\n\n"
+            "**Формат:** `/quickpost <канал> <время> <текст>`\n\n"
+            "**Примеры:**\n"
+            "• `/quickpost @channel now Текст поста`\n"
+            "• `/quickpost 1 draft Черновик поста`\n"
+            "• `/quickpost 2 2024-12-25_15:30 Запланированный пост`\n\n"
+            "**Параметры:**\n"
+            "• Канал: @username, ID или номер в списке\n"
+            "• Время: now, draft или YYYY-MM-DD_HH:MM\n"
+            "• Текст: содержимое поста",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+        await callback.answer()
+    except Exception as e:
+        print(f"Error in callback_create_quick_help: {e}")
+        await callback.answer("❌ Произошла ошибка")
+
+# Обработчик для меню постов
+@dp.callback_query(F.data == "posts_menu")
+async def callback_posts_menu_global(callback: CallbackQuery):
+    """Глобальный обработчик меню постов"""
+    try:
+        from list_posts import callback_posts_menu
+        await callback_posts_menu(callback)
+    except Exception as e:
+        print(f"Error in callback_posts_menu_global: {e}")
+        await callback.answer("❌ Произошла ошибка")
+
+# Import and start the scheduler
+import auto_post_fixed as auto_post
+
+async def main():
+    print("🚀 Запуск бота...")
+    print(f"📊 База данных: {SUPABASE_URL}")
+    
+    # Start background task for auto-posting
+    asyncio.create_task(auto_post.start_scheduler(bot))
+    print("⏰ Планировщик запущен")
+    
+    # Start polling
+    print("🔄 Начинаем получение обновлений...")
+    
+    # Удаляем webhook если он был установлен
+    await bot.delete_webhook(drop_pending_updates=True)
+    
+    try:
+        await dp.start_polling(bot)
+    except Exception as e:
+        print(f"❌ Ошибка при запуске бота: {e}")
+        # Если ошибка связана с другим экземпляром бота, ждем и пробуем снова
+        if "terminated by other getUpdates request" in str(e):
+            print("⏳ Ожидание завершения другого экземпляра бота...")
+            await asyncio.sleep(5)
+            await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
