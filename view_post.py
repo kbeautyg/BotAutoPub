@@ -358,133 +358,6 @@ async def cmd_view_post(message: Message):
     
     await message.answer(info_text, parse_mode="Markdown", reply_markup=keyboard)
 
-async def send_post_preview(message: Message, post: dict, channel: dict = None):
-    """Отправить превью поста с правильной обработкой форматирования"""
-    text = post.get("text", "")
-    media_id = post.get("media_id")
-    media_type = post.get("media_type")
-    format_type = post.get("parse_mode") or post.get("format")
-    buttons = post.get("buttons")
-    
-    # Определяем parse_mode
-    parse_mode = None
-    if format_type:
-        if format_type.lower() == "markdown":
-            parse_mode = "Markdown"
-        elif format_type.lower() == "html":
-            parse_mode = "HTML"
-    
-    # Очищаем и подготавливаем текст для формата
-    if text and parse_mode:
-        try:
-            cleaned_text = clean_text_for_format(text, parse_mode)
-        except Exception as e:
-            print(f"Error cleaning text: {e}")
-            cleaned_text = text
-            parse_mode = None  # Отключаем форматирование при ошибке
-    else:
-        cleaned_text = text
-    
-    # Подготовка кнопок
-    markup = None
-    if buttons:
-        try:
-            if isinstance(buttons, str):
-                buttons_list = json.loads(buttons)
-            else:
-                buttons_list = buttons
-            
-            if buttons_list:
-                kb = []
-                for btn in buttons_list:
-                    if isinstance(btn, dict) and btn.get("text") and btn.get("url"):
-                        kb.append([InlineKeyboardButton(text=btn["text"], url=btn["url"])])
-                if kb:
-                    markup = InlineKeyboardMarkup(inline_keyboard=kb)
-        except Exception as e:
-            print(f"Error processing buttons: {e}")
-            pass
-    
-    # Fallback text если основной пустой
-    final_text = cleaned_text or "📝 *Пост без текста*"
-    fallback_parse_mode = parse_mode or "Markdown"
-    
-    # Отправка превью
-    try:
-        if media_id and media_type:
-            if media_type.lower() == "photo":
-                await message.answer_photo(
-                    media_id,
-                    caption=final_text,
-                    parse_mode=parse_mode,
-                    reply_markup=markup
-                )
-            elif media_type.lower() == "video":
-                await message.answer_video(
-                    media_id,
-                    caption=final_text,
-                    parse_mode=parse_mode,
-                    reply_markup=markup
-                )
-            elif media_type.lower() == "animation":
-                await message.answer_animation(
-                    media_id,
-                    caption=final_text,
-                    parse_mode=parse_mode,
-                    reply_markup=markup
-                )
-        else:
-            await message.answer(
-                final_text,
-                parse_mode=parse_mode,
-                reply_markup=markup
-            )
-    except Exception as e:
-        print(f"First attempt failed: {e}")
-        # Второй попытка без форматирования
-        try:
-            safe_text = clean_text_for_format(text, None) if text else "📝 Пост без текста"
-            
-            if media_id and media_type:
-                if media_type.lower() == "photo":
-                    await message.answer_photo(
-                        media_id,
-                        caption=safe_text,
-                        reply_markup=markup
-                    )
-                elif media_type.lower() == "video":
-                    await message.answer_video(
-                        media_id,
-                        caption=safe_text,
-                        reply_markup=markup
-                    )
-                elif media_type.lower() == "animation":
-                    await message.answer_animation(
-                        media_id,
-                        caption=safe_text,
-                        reply_markup=markup
-                    )
-            else:
-                await message.answer(
-                    safe_text,
-                    reply_markup=markup
-                )
-        except Exception as e2:
-            print(f"Second attempt failed: {e2}")
-            # Последняя попытка с минимальным текстом
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-            ])
-            
-            error_msg = f"⚠️ **Ошибка предпросмотра**\n\nНе удалось показать превью поста из-за ошибки форматирования.\n\n**Формат:** {format_type or 'не задан'}\n**Ошибка:** {str(e)}"
-            
-            await message.answer(
-                error_msg,
-                parse_mode="Markdown",
-                reply_markup=keyboard
-            )
-
 def format_interval(seconds: int) -> str:
     """Форматировать интервал в человекочитаемый вид"""
     if seconds % 86400 == 0:
@@ -579,25 +452,57 @@ async def cmd_publish_now(message: Message):
         await message.answer("❌ Пост уже опубликован", reply_markup=keyboard)
         return
     
-    # Обновляем время публикации на текущее
+    # Обновляем время публикации на текущее - ИСПРАВЛЕНО
     now = datetime.now(ZoneInfo("UTC"))
     supabase_db.db.update_post(post_id, {
-        "publish_time": now,
+        "publish_time": now.isoformat(),  # Конвертируем в строку!
         "draft": False
     })
     
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_full_view:{post_id}")],
-        [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-    ])
-    
-    await message.answer(
-        f"🚀 **Пост #{post_id} поставлен в очередь**\n\n"
-        f"Пост будет опубликован в ближайшее время.",
-        parse_mode="Markdown",
-        reply_markup=keyboard
-    )
+    # Пытаемся получить бот из main.py для немедленной публикации
+    try:
+        # Импортируем функцию из main.py
+        from main import publish_post_immediately
+        
+        # Пытаемся опубликовать немедленно
+        # Получаем бот из глобального контекста
+        from main import bot
+        published = await publish_post_immediately(bot, post_id)
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_full_view:{post_id}")],
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        
+        if published:
+            await message.answer(
+                f"✅ **Пост #{post_id} опубликован!**\n\n"
+                f"Пост успешно опубликован в канал.",
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+        else:
+            await message.answer(
+                f"🚀 **Пост #{post_id} поставлен в очередь**\n\n"
+                f"Пост будет опубликован в ближайшее время.",
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+    except ImportError:
+        # Fallback если не удается импортировать функцию
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👀 Просмотр поста", callback_data=f"post_full_view:{post_id}")],
+            [InlineKeyboardButton(text="📋 Список постов", callback_data="posts_menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        
+        await message.answer(
+            f"🚀 **Пост #{post_id} поставлен в очередь**\n\n"
+            f"Пост будет опубликован в ближайшее время.",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
 
 @router.message(Command("reschedule"))
 async def cmd_reschedule_post(message: Message):
@@ -676,9 +581,9 @@ async def cmd_reschedule_post(message: Message):
             await message.answer("❌ Время должно быть в будущем", reply_markup=keyboard)
             return
         
-        # Обновляем пост
+        # Обновляем пост - ИСПРАВЛЕНО
         supabase_db.db.update_post(post_id, {
-            "publish_time": utc_dt,
+            "publish_time": utc_dt.isoformat(),  # Конвертируем в строку!
             "draft": False,
             "notified": False
         })
