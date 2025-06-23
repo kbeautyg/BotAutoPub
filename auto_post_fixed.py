@@ -6,7 +6,7 @@ import supabase_db
 from __init__ import TEXTS
 import json
 
-def prepare_media_text(text: str, max_caption_length: int = 1024) -> tuple[str, str]:
+def prepare_media_text(text: str, max_caption_length: int = 1000) -> tuple[str, str]:
     """
     Подготовить текст для медиа с caption и возможное дополнительное сообщение
     Возвращает (caption_text, additional_text)
@@ -31,7 +31,7 @@ def prepare_media_text(text: str, max_caption_length: int = 1024) -> tuple[str, 
     
     return caption_text, additional_text
 
-async def start_scheduler(bot: Bot, check_interval: int = 5):
+async def start_scheduler(bot: Bot, check_interval: int = 2):
     """Background task to publish scheduled posts and send notifications."""
     while True:
         try:
@@ -42,7 +42,7 @@ async def start_scheduler(bot: Bot, check_interval: int = 5):
             
             for post in due_posts:
                 post_id = post["id"]
-                user_id = post.get("user_id")
+                user_id = post.get("user_id") or post.get("created_by")
                 chat_id = None
                 
                 # Determine channel chat_id
@@ -99,8 +99,8 @@ async def start_scheduler(bot: Bot, check_interval: int = 5):
                 # Try to publish
                 try:
                     if media_id and media_type:
-                        # Подготавливаем текст для медиа с caption
-                        caption_text, additional_text = prepare_media_text(text)
+                        # Подготавливаем текст для медиа с caption (ИСПРАВЛЕНО - уменьшен лимит)
+                        caption_text, additional_text = prepare_media_text(text, max_caption_length=1000)
                         
                         if media_type.lower() == "photo":
                             await bot.send_photo(
@@ -138,7 +138,7 @@ async def start_scheduler(bot: Bot, check_interval: int = 5):
                         # Для текстовых сообщений без медиа ограничений caption нет
                         await bot.send_message(
                             chat_id, 
-                            text or TEXTS['en']['no_text'], 
+                            text or TEXTS['ru']['no_text'], 
                             parse_mode=parse_mode, 
                             reply_markup=markup
                         )
@@ -149,28 +149,73 @@ async def start_scheduler(bot: Bot, check_interval: int = 5):
                     error_msg = str(e)
                     print(f"❌ Ошибка публикации поста #{post_id}: {error_msg}")
                     
-                    # Notify user about error
-                    if user_id:
-                        chan_name = str(chat_id)
-                        channel = supabase_db.db.get_channel_by_chat_id(chat_id)
-                        if channel:
-                            chan_name = channel.get("name") or str(chat_id)
-                        
-                        lang = "ru"
-                        user = supabase_db.db.get_user(user_id)
-                        if user:
-                            lang = user.get("language", "ru")
-                        
-                        msg_text = TEXTS[lang]['error_post_failed'].format(
-                            id=post_id, 
-                            channel=chan_name, 
-                            error=error_msg
-                        )
-                        
+                    # Если ошибка связана с длинным caption, пробуем еще раз с меньшим лимитом
+                    if "caption is too long" in error_msg.lower() and media_id and media_type:
                         try:
-                            await bot.send_message(user_id, msg_text)
-                        except:
-                            pass
+                            print(f"🔄 Повторная попытка с коротким caption для поста #{post_id}")
+                            # Еще более короткий caption
+                            caption_text, additional_text = prepare_media_text(text, max_caption_length=500)
+                            
+                            if media_type.lower() == "photo":
+                                await bot.send_photo(chat_id, photo=media_id, caption=caption_text, parse_mode=parse_mode, reply_markup=markup)
+                            elif media_type.lower() == "video":
+                                await bot.send_video(chat_id, video=media_id, caption=caption_text, parse_mode=parse_mode, reply_markup=markup)
+                            elif media_type.lower() == "animation":
+                                await bot.send_animation(chat_id, animation=media_id, caption=caption_text, parse_mode=parse_mode, reply_markup=markup)
+                            
+                            # Отправляем оставшийся текст отдельно
+                            if additional_text:
+                                await bot.send_message(chat_id, additional_text, parse_mode=parse_mode)
+                            
+                            print(f"✅ Пост #{post_id} опубликован после повторной попытки")
+                            
+                        except Exception as e2:
+                            print(f"❌ Повторная попытка также провалилась для поста #{post_id}: {e2}")
+                            # Уведомляем пользователя об ошибке
+                            if user_id:
+                                chan_name = str(chat_id)
+                                channel = supabase_db.db.get_channel_by_chat_id(chat_id)
+                                if channel:
+                                    chan_name = channel.get("name") or str(chat_id)
+                                
+                                lang = "ru"
+                                user = supabase_db.db.get_user(user_id)
+                                if user:
+                                    lang = user.get("language", "ru")
+                                
+                                msg_text = TEXTS[lang]['error_post_failed'].format(
+                                    id=post_id, 
+                                    channel=chan_name, 
+                                    error=str(e2)
+                                )
+                                
+                                try:
+                                    await bot.send_message(user_id, msg_text)
+                                except:
+                                    pass
+                    else:
+                        # Другие ошибки - уведомляем пользователя
+                        if user_id:
+                            chan_name = str(chat_id)
+                            channel = supabase_db.db.get_channel_by_chat_id(chat_id)
+                            if channel:
+                                chan_name = channel.get("name") or str(chat_id)
+                            
+                            lang = "ru"
+                            user = supabase_db.db.get_user(user_id)
+                            if user:
+                                lang = user.get("language", "ru")
+                            
+                            msg_text = TEXTS[lang]['error_post_failed'].format(
+                                id=post_id, 
+                                channel=chan_name, 
+                                error=error_msg
+                            )
+                            
+                            try:
+                                await bot.send_message(user_id, msg_text)
+                            except:
+                                pass
                     
                     supabase_db.db.mark_post_published(post_id)
                     continue
@@ -199,7 +244,7 @@ async def start_scheduler(bot: Bot, check_interval: int = 5):
                         # Calculate next time
                         next_time = current_dt + timedelta(seconds=repeat_int)
                         
-                        # Update post with new time (as ISO string)
+                        # Update post with new time (ИСПРАВЛЕНО - как строка)
                         supabase_db.db.update_post(post_id, {
                             "publish_time": next_time.isoformat(),
                             "published": False,
@@ -222,7 +267,7 @@ async def start_scheduler(bot: Bot, check_interval: int = 5):
                 if post.get("published") or post.get("draft"):
                     continue
                 
-                user_id = post.get("user_id")
+                user_id = post.get("user_id") or post.get("created_by")
                 if not user_id:
                     continue
                 
