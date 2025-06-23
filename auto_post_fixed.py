@@ -6,6 +6,31 @@ import supabase_db
 from __init__ import TEXTS
 import json
 
+def prepare_media_text(text: str, max_caption_length: int = 1024) -> tuple[str, str]:
+    """
+    Подготовить текст для медиа с caption и возможное дополнительное сообщение
+    Возвращает (caption_text, additional_text)
+    """
+    if not text:
+        return "", ""
+    
+    if len(text) <= max_caption_length:
+        return text, ""
+    
+    # Обрезаем caption и оставляем остальное для отдельного сообщения
+    # Ищем последний пробел в пределах лимита, чтобы не разрывать слова
+    caption_text = text[:max_caption_length]
+    last_space = caption_text.rfind(' ')
+    
+    if last_space > max_caption_length * 0.8:  # Если пробел найден не слишком далеко от конца
+        caption_text = text[:last_space] + "..."
+        additional_text = text[last_space:].strip()
+    else:
+        caption_text = text[:max_caption_length-3] + "..."
+        additional_text = text[max_caption_length:].strip()
+    
+    return caption_text, additional_text
+
 async def start_scheduler(bot: Bot, check_interval: int = 5):
     """Background task to publish scheduled posts and send notifications."""
     while True:
@@ -74,11 +99,14 @@ async def start_scheduler(bot: Bot, check_interval: int = 5):
                 # Try to publish
                 try:
                     if media_id and media_type:
+                        # Подготавливаем текст для медиа с caption
+                        caption_text, additional_text = prepare_media_text(text)
+                        
                         if media_type.lower() == "photo":
                             await bot.send_photo(
                                 chat_id, 
                                 photo=media_id, 
-                                caption=text, 
+                                caption=caption_text, 
                                 parse_mode=parse_mode, 
                                 reply_markup=markup
                             )
@@ -86,7 +114,7 @@ async def start_scheduler(bot: Bot, check_interval: int = 5):
                             await bot.send_video(
                                 chat_id, 
                                 video=media_id, 
-                                caption=text, 
+                                caption=caption_text, 
                                 parse_mode=parse_mode, 
                                 reply_markup=markup
                             )
@@ -94,18 +122,20 @@ async def start_scheduler(bot: Bot, check_interval: int = 5):
                             await bot.send_animation(
                                 chat_id,
                                 animation=media_id,
-                                caption=text,
+                                caption=caption_text,
                                 parse_mode=parse_mode,
                                 reply_markup=markup
                             )
-                        else:
+                        
+                        # Если есть дополнительный текст, отправляем его отдельным сообщением
+                        if additional_text:
                             await bot.send_message(
-                                chat_id, 
-                                text or TEXTS['en']['no_text'], 
-                                parse_mode=parse_mode, 
-                                reply_markup=markup
+                                chat_id,
+                                additional_text,
+                                parse_mode=parse_mode
                             )
                     else:
+                        # Для текстовых сообщений без медиа ограничений caption нет
                         await bot.send_message(
                             chat_id, 
                             text or TEXTS['en']['no_text'], 
