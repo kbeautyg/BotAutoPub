@@ -326,7 +326,7 @@ async def cmd_quick_post(message: Message, state: FSMContext):
         "created_by": user_id,
         "text": text,
         "parse_mode": "HTML",
-        "publish_time": publish_time.isoformat() if publish_time else None,
+        "publish_time": publish_time.isoformat() if publish_time else None,  # Конвертируем в строку!
         "draft": draft,
         "published": False
     }
