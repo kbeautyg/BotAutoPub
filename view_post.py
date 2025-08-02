@@ -87,7 +87,8 @@ def clean_text_for_format(text: str, parse_mode: str) -> str:
 
 def escape_markdown_v2_text(text: str) -> str:
     """Экранирует специальные символы для MarkdownV2 (для использования в тексте ссылок и т.д.)"""
-    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!', '\\']
+    # ВАЖНО: backslash должен быть первым в списке!
+    special_chars = ['\\', '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
     for char in special_chars:
         text = text.replace(char, '\\' + char)
     return text
