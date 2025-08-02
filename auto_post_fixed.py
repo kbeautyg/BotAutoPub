@@ -164,8 +164,8 @@ async def start_scheduler(bot: Bot, check_interval: int = 2):
                 # Try to publish
                 try:
                     if media_id and media_type:
-                        # Подготавливаем текст для медиа с caption (ИСПРАВЛЕНО - уменьшен лимит до 800)
-                        caption_text, additional_text = prepare_media_text(cleaned_text, max_caption_length=800)
+                        # Используем умную подготовку текста с учетом экранирования
+                        caption_text, additional_text = prepare_media_text_smart(text, parse_mode, max_caption_length=1024)
                         
                         if media_type.lower() == "photo":
                             await bot.send_photo(
