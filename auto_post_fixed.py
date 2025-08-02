@@ -5,6 +5,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import supabase_db
 from __init__ import TEXTS
 import json
+from view_post import clean_text_for_format
 
 def prepare_media_text(text: str, max_caption_length: int = 1000) -> tuple[str, str]:
     """
@@ -92,15 +93,20 @@ async def start_scheduler(bot: Bot, check_interval: int = 2):
                 # Determine parse mode
                 parse_mode = None
                 if parse_mode_field and parse_mode_field.lower() == "markdown":
-                    parse_mode = "Markdown"
+                    parse_mode = "MarkdownV2"
                 elif parse_mode_field and parse_mode_field.lower() == "html":
                     parse_mode = "HTML"
-                
+
+                cleaned_text = clean_text_for_format(
+                    text,
+                    parse_mode.replace("V2", "") if parse_mode else None,
+                )
+
                 # Try to publish
                 try:
                     if media_id and media_type:
                         # Подготавливаем текст для медиа с caption (ИСПРАВЛЕНО - уменьшен лимит)
-                        caption_text, additional_text = prepare_media_text(text, max_caption_length=1000)
+                        caption_text, additional_text = prepare_media_text(cleaned_text, max_caption_length=1000)
                         
                         if media_type.lower() == "photo":
                             await bot.send_photo(
@@ -137,9 +143,9 @@ async def start_scheduler(bot: Bot, check_interval: int = 2):
                     else:
                         # Для текстовых сообщений без медиа ограничений caption нет
                         await bot.send_message(
-                            chat_id, 
-                            text or TEXTS['ru']['no_text'], 
-                            parse_mode=parse_mode, 
+                            chat_id,
+                            cleaned_text or TEXTS['ru']['no_text'],
+                            parse_mode=parse_mode,
                             reply_markup=markup
                         )
                     
@@ -154,7 +160,7 @@ async def start_scheduler(bot: Bot, check_interval: int = 2):
                         try:
                             print(f"🔄 Повторная попытка с коротким caption для поста #{post_id}")
                             # Еще более короткий caption
-                            caption_text, additional_text = prepare_media_text(text, max_caption_length=500)
+                            caption_text, additional_text = prepare_media_text(cleaned_text, max_caption_length=500)
                             
                             if media_type.lower() == "photo":
                                 await bot.send_photo(chat_id, photo=media_id, caption=caption_text, parse_mode=parse_mode, reply_markup=markup)
