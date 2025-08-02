@@ -36,27 +36,79 @@ def clean_text_for_format(text: str, parse_mode: str) -> str:
     """Очистить и подготовить текст для определенного формата"""
     if not text:
         return text
-    
+
     if parse_mode == "Markdown":
-        # Экранируем специальные символы Markdown
-        # Сначала убираем HTML-теги если они есть
-        text = re.sub(r'<[^>]+>', '', text)
-        
-        # Экранируем специальные символы Markdown v2
-        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        # Сначала экранируем все специальные символы Markdown
+        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!', '\\']
+
+        # Обрабатываем ссылки [url=link]text[/url] заранее
+        placeholders = {}
+        url_pattern = r'\[url=([^\]]+)\]([^\[]+)\[/url\]'
+        for i, (url, link_text) in enumerate(re.findall(url_pattern, text)):
+            placeholder = f'URLPH{i}'
+
+            # Экранируем спецсимволы в текстовой части ссылки
+            escaped_link_text = link_text
+            for char in special_chars:
+                escaped_link_text = escaped_link_text.replace(char, '\\' + char)
+
+            # Экранируем проблемные символы в URL
+            escaped_url = url.replace(')', '\\)').replace('(', '\\(').replace('\\', '\\\\')
+
+            placeholders[placeholder] = f'[{escaped_link_text}]({escaped_url})'
+            text = re.sub(r'\[url=' + re.escape(url) + r'\]' + re.escape(link_text) + r'\[/url\]', placeholder, text, count=1)
+
+        # Наши пользовательские теги, обрабатываем только парные вхождения
+        tag_defs = [
+            ('[b]', '[/b]', 'PHBOLDSTART', 'PHBOLDEND', '*'),
+            ('[i]', '[/i]', 'PHITALICSTART', 'PHITALICEND', '_'),
+            ('[u]', '[/u]', 'PHUNDERLINESTART', 'PHUNDERLINEEND', '__'),
+            ('[s]', '[/s]', 'PHSTRIKESTART', 'PHSTRIKEEND', '~'),
+            ('[code]', '[/code]', 'PHCODESTART', 'PHCODEEND', '`'),
+            ('[pre]', '[/pre]', 'PHPRESTART', 'PHPREEND', '```')
+        ]
+
+        for start_tag, end_tag, start_ph, end_ph, md in tag_defs:
+            pattern = re.escape(start_tag) + r'(.*?)' + re.escape(end_tag)
+            text = re.sub(pattern, lambda m: f'{start_ph}{m.group(1)}{end_ph}', text, flags=re.DOTALL)
+
+        # Экранируем специальные символы
         for char in special_chars:
             text = text.replace(char, '\\' + char)
-        
+
+        # Возвращаем теги как Markdown
+        for start_ph, end_ph, md in [
+            ('PHBOLDSTART', 'PHBOLDEND', '*'),
+            ('PHITALICSTART', 'PHITALICEND', '_'),
+            ('PHUNDERLINESTART', 'PHUNDERLINEEND', '__'),
+            ('PHSTRIKESTART', 'PHSTRIKEEND', '~'),
+            ('PHCODESTART', 'PHCODEEND', '`'),
+            ('PHPRESTART', 'PHPREEND', '```'),
+        ]:
+            text = text.replace(start_ph, md).replace(end_ph, md)
+
+        # Возвращаем ссылки
+        for placeholder, markdown_link in placeholders.items():
+            text = text.replace(placeholder, markdown_link)
+
         return text
-    
+
     elif parse_mode == "HTML":
-        # Экранируем HTML символы если нет тегов
-        if not re.search(r'<[^>]+>', text):
-            text = html.escape(text)
+        # Заменяем пользовательские теги на HTML
+        text = text.replace('[b]', '<b>').replace('[/b]', '</b>')
+        text = text.replace('[i]', '<i>').replace('[/i]', '</i>')
+        text = text.replace('[u]', '<u>').replace('[/u]', '</u>')
+        text = text.replace('[s]', '<s>').replace('[/s]', '</s>')
+        text = text.replace('[code]', '<code>').replace('[/code]', '</code>')
+        text = text.replace('[pre]', '<pre>').replace('[/pre]', '</pre>')
+
+        # Обрабатываем ссылки
+        text = re.sub(r'\[url=([^\]]+)\]([^\[]+)\[/url\]', r'<a href="\1">\2</a>', text)
         return text
-    
+
     else:
         # Обычный текст - убираем все теги и специальные символы
+        text = re.sub(r'\[[^\]]*\]', '', text)
         text = re.sub(r'<[^>]+>', '', text)
         return text
 
