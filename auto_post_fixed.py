@@ -200,10 +200,11 @@ async def start_scheduler(bot: Bot, check_interval: int = 2):
                                 parse_mode=parse_mode
                             )
                     else:
-                        # Для текстовых сообщений без медиа ограничений caption нет
+                        # Для текстовых сообщений без медиа тоже применяем форматирование
+                        formatted_text = clean_text_for_format(text, parse_mode.replace("V2", "") if parse_mode else None)
                         await bot.send_message(
                             chat_id,
-                            cleaned_text or TEXTS['ru']['no_text'],
+                            formatted_text or TEXTS['ru']['no_text'],
                             parse_mode=parse_mode,
                             reply_markup=markup
                         )
