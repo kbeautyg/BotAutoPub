@@ -75,56 +75,8 @@ def clean_text_for_format(text: str, parse_mode: str) -> str:
         return text
     
     elif parse_mode == "Markdown":
-        # MarkdownV2 требует экранирования этих символов
-        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
-        
-        # Сначала сохраняем пользовательские теги и ссылки
-        placeholders = {}
-        placeholder_counter = 0
-        
-        # Обрабатываем ссылки [url=link]text[/url] заранее
-        url_pattern = r'\[url=([^\]]+)\]([^\[]+?)\[/url\]'
-        for match in re.finditer(url_pattern, text):
-            url, link_text = match.groups()
-            placeholder = f'__URLPH_{placeholder_counter}__'
-            # Экранируем символы в тексте ссылки для MarkdownV2
-            escaped_link_text = escape_markdown_v2_text(link_text)
-            placeholders[placeholder] = f'[{escaped_link_text}]({url})'
-            text = text.replace(match.group(0), placeholder)
-            placeholder_counter += 1
-
-        # Обрабатываем пользовательские теги
-        tag_defs = [
-            ('[b]', '[/b]', '*', '*'),
-            ('[i]', '[/i]', '_', '_'),
-            ('[u]', '[/u]', '__', '__'),
-            ('[s]', '[/s]', '~', '~'),
-            ('[code]', '[/code]', '`', '`'),
-            ('[pre]', '[/pre]', '```', '```')
-        ]
-
-        for start_tag, end_tag, md_start, md_end in tag_defs:
-            pattern = re.escape(start_tag) + r'(.*?)' + re.escape(end_tag)
-            def replace_tag(match):
-                nonlocal placeholder_counter
-                content = match.group(1)
-                placeholder = f'__TAGPH_{placeholder_counter}__'
-                # Для тегов форматирования не экранируем содержимое
-                placeholders[placeholder] = f'{md_start}{content}{md_end}'
-                placeholder_counter += 1
-                return placeholder
-            
-            text = re.sub(pattern, replace_tag, text, flags=re.DOTALL)
-
-        # Теперь экранируем специальные символы в основном тексте
-        for char in special_chars:
-            text = text.replace(char, '\\' + char)
-
-        # Восстанавливаем placeholders
-        for placeholder, replacement in placeholders.items():
-            text = text.replace(placeholder, replacement)
-
-        return text
+        # Полностью переписанная логика экранирования для MarkdownV2
+        return escape_markdown_v2_properly(text)
     
     else:
         # Обычный текст - убираем все теги и специальные символы
