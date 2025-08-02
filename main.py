@@ -99,7 +99,11 @@ async def publish_post_immediately(bot: Bot, post_id: int) -> bool:
         )
 
         # Функция для подготовки текста с обрезкой caption
-        def prepare_media_text(text: str, max_caption_length: int = 1000) -> tuple[str, str]:
+        def prepare_media_text(text: str, max_caption_length: int = 800) -> tuple[str, str]:
+            """
+            Подготовить текст для медиа с caption и возможное дополнительное сообщение
+            Уменьшен лимит до 800 символов чтобы учесть экранирование MarkdownV2
+            """
             if not text:
                 return "", ""
             
