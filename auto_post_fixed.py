@@ -7,6 +7,63 @@ from __init__ import TEXTS
 import json
 from view_post import clean_text_for_format
 
+def prepare_media_text_smart(text: str, parse_mode: str = None, max_caption_length: int = 1024) -> tuple[str, str]:
+    """
+    Умная подготовка текста для медиа с учетом экранирования
+    Сначала применяет форматирование, затем проверяет длину
+    """
+    if not text:
+        return "", ""
+    
+    # Импортируем функцию очистки
+    from view_post import clean_text_for_format
+    
+    # Определяем режим парсинга для очистки
+    format_mode = None
+    if parse_mode == "MarkdownV2":
+        format_mode = "Markdown"
+    elif parse_mode == "HTML":
+        format_mode = "HTML"
+    
+    # Применяем форматирование/экранирование
+    formatted_text = clean_text_for_format(text, format_mode) if format_mode else text
+    
+    # Проверяем длину уже отформатированного текста
+    if len(formatted_text) <= max_caption_length:
+        return formatted_text, ""
+    
+    # Нужно обрезать ПО ИСХОДНОМУ тексту, а не отформатированному
+    # Ищем подходящую длину исходного текста
+    target_length = max_caption_length - 50  # резерв на экранирование и "..."
+    
+    while target_length > 50:  # минимальная длина
+        test_text = text[:target_length]
+        last_space = test_text.rfind(' ')
+        
+        if last_space > target_length * 0.8:
+            test_text = text[:last_space]
+        
+        # Добавляем "..." и форматируем
+        caption_candidate = clean_text_for_format(test_text + "...", format_mode) if format_mode else (test_text + "...")
+        
+        # Если подходит - используем
+        if len(caption_candidate) <= max_caption_length:
+            remaining_text = text[len(test_text):].strip()
+            additional_text = clean_text_for_format(remaining_text, format_mode) if format_mode and remaining_text else remaining_text
+            return caption_candidate, additional_text
+        
+        # Уменьшаем длину и пробуем снова
+        target_length -= 50
+    
+    # Если совсем не получается - возвращаем минимум
+    minimal_text = text[:100] + "..."
+    minimal_formatted = clean_text_for_format(minimal_text, format_mode) if format_mode else minimal_text
+    remaining_text = text[100:].strip()
+    additional_text = clean_text_for_format(remaining_text, format_mode) if format_mode and remaining_text else remaining_text
+    
+    return minimal_formatted, additional_text
+
+
 def prepare_media_text(text: str, max_caption_length: int = 800) -> tuple[str, str]:
     """
     Подготовить текст для медиа с caption и возможное дополнительное сообщение
