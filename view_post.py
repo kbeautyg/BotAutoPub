@@ -75,49 +75,54 @@ def clean_text_for_format(text: str, parse_mode: str) -> str:
         return text
     
     elif parse_mode == "Markdown":
-        # Сначала экранируем все специальные символы Markdown
-        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!', '\\']
-
-        # Обрабатываем ссылки [url=link]text[/url] заранее
+        # MarkdownV2 требует экранирования этих символов
+        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        
+        # Сначала сохраняем пользовательские теги и ссылки
         placeholders = {}
-        url_pattern = r'\[url=([^\]]+)\]([^\[]+)\[/url\]'
-        for i, (url, link_text) in enumerate(re.findall(url_pattern, text)):
-            placeholder = f'URLPH{i}'
-            placeholders[placeholder] = f'[{link_text}]({url})'
-            text = re.sub(r'\[url=' + re.escape(url) + r'\]' + re.escape(link_text) + r'\[/url\]', placeholder, text, count=1)
+        placeholder_counter = 0
+        
+        # Обрабатываем ссылки [url=link]text[/url] заранее
+        url_pattern = r'\[url=([^\]]+)\]([^\[]+?)\[/url\]'
+        for match in re.finditer(url_pattern, text):
+            url, link_text = match.groups()
+            placeholder = f'__URLPH_{placeholder_counter}__'
+            # Экранируем символы в тексте ссылки для MarkdownV2
+            escaped_link_text = escape_markdown_v2_text(link_text)
+            placeholders[placeholder] = f'[{escaped_link_text}]({url})'
+            text = text.replace(match.group(0), placeholder)
+            placeholder_counter += 1
 
-        # Наши пользовательские теги, обрабатываем только парные вхождения
+        # Обрабатываем пользовательские теги
         tag_defs = [
-            ('[b]', '[/b]', 'PHBOLDSTART', 'PHBOLDEND', '*'),
-            ('[i]', '[/i]', 'PHITALICSTART', 'PHITALICEND', '_'),
-            ('[u]', '[/u]', 'PHUNDERLINESTART', 'PHUNDERLINEEND', '__'),
-            ('[s]', '[/s]', 'PHSTRIKESTART', 'PHSTRIKEEND', '~'),
-            ('[code]', '[/code]', 'PHCODESTART', 'PHCODEEND', '`'),
-            ('[pre]', '[/pre]', 'PHPRESTART', 'PHPREEND', '```')
+            ('[b]', '[/b]', '*', '*'),
+            ('[i]', '[/i]', '_', '_'),
+            ('[u]', '[/u]', '__', '__'),
+            ('[s]', '[/s]', '~', '~'),
+            ('[code]', '[/code]', '`', '`'),
+            ('[pre]', '[/pre]', '```', '```')
         ]
 
-        for start_tag, end_tag, start_ph, end_ph, md in tag_defs:
+        for start_tag, end_tag, md_start, md_end in tag_defs:
             pattern = re.escape(start_tag) + r'(.*?)' + re.escape(end_tag)
-            text = re.sub(pattern, lambda m: f'{start_ph}{m.group(1)}{end_ph}', text, flags=re.DOTALL)
+            def replace_tag(match):
+                nonlocal placeholder_counter
+                content = match.group(1)
+                placeholder = f'__TAGPH_{placeholder_counter}__'
+                # Для тегов форматирования не экранируем содержимое
+                placeholders[placeholder] = f'{md_start}{content}{md_end}'
+                placeholder_counter += 1
+                return placeholder
+            
+            text = re.sub(pattern, replace_tag, text, flags=re.DOTALL)
 
-        # Экранируем специальные символы
+        # Теперь экранируем специальные символы в основном тексте
         for char in special_chars:
             text = text.replace(char, '\\' + char)
 
-        # Возвращаем теги как Markdown
-        for start_ph, end_ph, md in [
-            ('PHBOLDSTART', 'PHBOLDEND', '*'),
-            ('PHITALICSTART', 'PHITALICEND', '_'),
-            ('PHUNDERLINESTART', 'PHUNDERLINEEND', '__'),
-            ('PHSTRIKESTART', 'PHSTRIKEEND', '~'),
-            ('PHCODESTART', 'PHCODEEND', '`'),
-            ('PHPRESTART', 'PHPREEND', '```'),
-        ]:
-            text = text.replace(start_ph, md).replace(end_ph, md)
-
-        # Возвращаем ссылки
-        for placeholder, markdown_link in placeholders.items():
-            text = text.replace(placeholder, markdown_link)
+        # Восстанавливаем placeholders
+        for placeholder, replacement in placeholders.items():
+            text = text.replace(placeholder, replacement)
 
         return text
     
@@ -126,6 +131,14 @@ def clean_text_for_format(text: str, parse_mode: str) -> str:
         text = re.sub(r'\[[^\]]*\]', '', text)  # Убираем наши теги
         text = re.sub(r'<[^>]+>', '', text)     # Убираем HTML теги
         return text
+
+
+def escape_markdown_v2_text(text: str) -> str:
+    """Экранирует специальные символы для MarkdownV2 (для использования в тексте ссылок и т.д.)"""
+    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!', '\\']
+    for char in special_chars:
+        text = text.replace(char, '\\' + char)
+    return text
 
 
 async def send_post_preview(message: Message, post: dict, channel: dict = None):
