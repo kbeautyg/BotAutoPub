@@ -138,7 +138,8 @@ def escape_markdown_v2_properly(text: str) -> str:
         text = re.sub(pattern, replace_tag, text, flags=re.DOTALL)
 
     # Теперь экранируем специальные символы в основном тексте
-    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    # ВАЖНО: backslash должен быть первым в списке!
+    special_chars = ['\\', '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
     for char in special_chars:
         text = text.replace(char, '\\' + char)
 
