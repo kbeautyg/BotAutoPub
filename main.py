@@ -98,33 +98,12 @@ async def publish_post_immediately(bot: Bot, post_id: int) -> bool:
             parse_mode.replace("V2", "") if parse_mode else None,
         )
 
-        # Функция для подготовки текста с обрезкой caption
-        def prepare_media_text(text: str, max_caption_length: int = 800) -> tuple[str, str]:
-            """
-            Подготовить текст для медиа с caption и возможное дополнительное сообщение
-            Уменьшен лимит до 800 символов чтобы учесть экранирование MarkdownV2
-            """
-            if not text:
-                return "", ""
-            
-            if len(text) <= max_caption_length:
-                return text, ""
-            
-            caption_text = text[:max_caption_length]
-            last_space = caption_text.rfind(' ')
-            
-            if last_space > max_caption_length * 0.8:
-                caption_text = text[:last_space] + "..."
-                additional_text = text[last_space:].strip()
-            else:
-                caption_text = text[:max_caption_length-3] + "..."
-                additional_text = text[max_caption_length:].strip()
-            
-            return caption_text, additional_text
+        # Импортируем умную функцию подготовки текста
+        from auto_post_fixed import prepare_media_text_smart
         
         # Публикуем пост
         if media_id and media_type:
-            caption_text, additional_text = prepare_media_text(cleaned_text)
+            caption_text, additional_text = prepare_media_text_smart(text, parse_mode, max_caption_length=1024)
             
             if media_type.lower() == "photo":
                 await bot.send_photo(
