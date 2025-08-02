@@ -7,10 +7,12 @@ from __init__ import TEXTS
 import json
 from view_post import clean_text_for_format
 
-def prepare_media_text(text: str, max_caption_length: int = 1000) -> tuple[str, str]:
+def prepare_media_text(text: str, max_caption_length: int = 800) -> tuple[str, str]:
     """
     Подготовить текст для медиа с caption и возможное дополнительное сообщение
     Возвращает (caption_text, additional_text)
+    
+    Уменьшен лимит до 800 символов чтобы учесть экранирование MarkdownV2
     """
     if not text:
         return "", ""
