@@ -161,8 +161,8 @@ async def start_scheduler(bot: Bot, check_interval: int = 2):
                     if "caption is too long" in error_msg.lower() and media_id and media_type:
                         try:
                             print(f"🔄 Повторная попытка с коротким caption для поста #{post_id}")
-                            # Еще более короткий caption
-                            caption_text, additional_text = prepare_media_text(cleaned_text, max_caption_length=500)
+                            # Еще более короткий caption (учитываем экранирование)
+                            caption_text, additional_text = prepare_media_text(cleaned_text, max_caption_length=400)
                             
                             if media_type.lower() == "photo":
                                 await bot.send_photo(chat_id, photo=media_id, caption=caption_text, parse_mode=parse_mode, reply_markup=markup)
