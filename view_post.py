@@ -107,7 +107,7 @@ def escape_markdown_v2_properly(text: str) -> str:
     url_pattern = r'\[url=([^\]]+)\]([^\[]+?)\[/url\]'
     for match in re.finditer(url_pattern, text):
         url, link_text = match.groups()
-        placeholder = f'__URLPH_{placeholder_counter}__'
+        placeholder = f'URLPH{placeholder_counter}PLACEHOLDER'
         # Экранируем символы в тексте ссылки для MarkdownV2
         escaped_link_text = escape_markdown_v2_text(link_text)
         placeholders[placeholder] = f'[{escaped_link_text}]({url})'
@@ -129,7 +129,7 @@ def escape_markdown_v2_properly(text: str) -> str:
         def replace_tag(match):
             nonlocal placeholder_counter
             content = match.group(1)
-            placeholder = f'__TAGPH_{placeholder_counter}__'
+            placeholder = f'TAGPH{placeholder_counter}PLACEHOLDER'
             # Для тегов форматирования не экранируем содержимое
             placeholders[placeholder] = f'{md_start}{content}{md_end}'
             placeholder_counter += 1
