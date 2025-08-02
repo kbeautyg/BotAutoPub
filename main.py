@@ -137,9 +137,11 @@ async def publish_post_immediately(bot: Bot, post_id: int) -> bool:
                     parse_mode=parse_mode
                 )
         else:
+            # Для текстовых сообщений без медиа тоже применяем форматирование
+            formatted_text = clean_text_for_format(text, parse_mode.replace("V2", "") if parse_mode else None)
             await bot.send_message(
                 chat_id,
-                cleaned_text or "Пост без текста",
+                formatted_text or "Пост без текста",
                 parse_mode=parse_mode,
                 reply_markup=markup
             )
