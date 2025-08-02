@@ -76,52 +76,49 @@ def clean_text_for_format(text: str, parse_mode: str) -> str:
     
     elif parse_mode == "Markdown":
         # Сначала экранируем все специальные символы Markdown
-        # Список символов, которые нужно экранировать в MarkdownV2
         special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!', '\\']
-        
-        # Временно заменяем наши теги на плейсхолдеры
+
+        # Обрабатываем ссылки [url=link]text[/url] заранее
         placeholders = {}
-        placeholder_count = 0
-        
-        # Сохраняем наши теги
-        our_tags = [
-            ('[b]', '[/b]', '__BOLD_START__', '__BOLD_END__'),
-            ('[i]', '[/i]', '__ITALIC_START__', '__ITALIC_END__'),
-            ('[u]', '[/u]', '__UNDERLINE_START__', '__UNDERLINE_END__'),
-            ('[s]', '[/s]', '__STRIKE_START__', '__STRIKE_END__'),
-            ('[code]', '[/code]', '__CODE_START__', '__CODE_END__'),
-            ('[pre]', '[/pre]', '__PRE_START__', '__PRE_END__')
-        ]
-        
-        # Заменяем наши теги на плейсхолдеры
-        for start_tag, end_tag, start_placeholder, end_placeholder in our_tags:
-            text = text.replace(start_tag, start_placeholder)
-            text = text.replace(end_tag, end_placeholder)
-        
-        # Обрабатываем ссылки отдельно
         url_pattern = r'\[url=([^\]]+)\]([^\[]+)\[/url\]'
-        urls = re.findall(url_pattern, text)
-        for i, (url, link_text) in enumerate(urls):
-            placeholder = f'__URL_PLACEHOLDER_{i}__'
+        for i, (url, link_text) in enumerate(re.findall(url_pattern, text)):
+            placeholder = f'URLPH{i}'
             placeholders[placeholder] = f'[{link_text}]({url})'
             text = re.sub(r'\[url=' + re.escape(url) + r'\]' + re.escape(link_text) + r'\[/url\]', placeholder, text, count=1)
-        
+
+        # Наши пользовательские теги, обрабатываем только парные вхождения
+        tag_defs = [
+            ('[b]', '[/b]', 'PHBOLDSTART', 'PHBOLDEND', '*'),
+            ('[i]', '[/i]', 'PHITALICSTART', 'PHITALICEND', '_'),
+            ('[u]', '[/u]', 'PHUNDERLINESTART', 'PHUNDERLINEEND', '__'),
+            ('[s]', '[/s]', 'PHSTRIKESTART', 'PHSTRIKEEND', '~'),
+            ('[code]', '[/code]', 'PHCODESTART', 'PHCODEEND', '`'),
+            ('[pre]', '[/pre]', 'PHPRESTART', 'PHPREEND', '```')
+        ]
+
+        for start_tag, end_tag, start_ph, end_ph, md in tag_defs:
+            pattern = re.escape(start_tag) + r'(.*?)' + re.escape(end_tag)
+            text = re.sub(pattern, lambda m: f'{start_ph}{m.group(1)}{end_ph}', text, flags=re.DOTALL)
+
         # Экранируем специальные символы
         for char in special_chars:
             text = text.replace(char, '\\' + char)
-        
-        # Возвращаем наши теги как Markdown
-        text = text.replace('__BOLD_START__', '*').replace('__BOLD_END__', '*')
-        text = text.replace('__ITALIC_START__', '_').replace('__ITALIC_END__', '_')
-        text = text.replace('__UNDERLINE_START__', '__').replace('__UNDERLINE_END__', '__')
-        text = text.replace('__STRIKE_START__', '~').replace('__STRIKE_END__', '~')
-        text = text.replace('__CODE_START__', '`').replace('__CODE_END__', '`')
-        text = text.replace('__PRE_START__', '```').replace('__PRE_END__', '```')
-        
+
+        # Возвращаем теги как Markdown
+        for start_ph, end_ph, md in [
+            ('PHBOLDSTART', 'PHBOLDEND', '*'),
+            ('PHITALICSTART', 'PHITALICEND', '_'),
+            ('PHUNDERLINESTART', 'PHUNDERLINEEND', '__'),
+            ('PHSTRIKESTART', 'PHSTRIKEEND', '~'),
+            ('PHCODESTART', 'PHCODEEND', '`'),
+            ('PHPRESTART', 'PHPREEND', '```'),
+        ]:
+            text = text.replace(start_ph, md).replace(end_ph, md)
+
         # Возвращаем ссылки
         for placeholder, markdown_link in placeholders.items():
             text = text.replace(placeholder, markdown_link)
-        
+
         return text
     
     else:
