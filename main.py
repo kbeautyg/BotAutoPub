@@ -7,6 +7,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from dotenv import load_dotenv
+from view_post import clean_text_for_format
 
 # Load environment variables
 load_dotenv()
@@ -88,10 +89,15 @@ async def publish_post_immediately(bot: Bot, post_id: int) -> bool:
         # Determine parse mode
         parse_mode = None
         if parse_mode_field and parse_mode_field.lower() == "markdown":
-            parse_mode = "Markdown"
+            parse_mode = "MarkdownV2"
         elif parse_mode_field and parse_mode_field.lower() == "html":
             parse_mode = "HTML"
-        
+
+        cleaned_text = clean_text_for_format(
+            text,
+            parse_mode.replace("V2", "") if parse_mode else None,
+        )
+
         # Функция для подготовки текста с обрезкой caption
         def prepare_media_text(text: str, max_caption_length: int = 1000) -> tuple[str, str]:
             if not text:
@@ -114,7 +120,7 @@ async def publish_post_immediately(bot: Bot, post_id: int) -> bool:
         
         # Публикуем пост
         if media_id and media_type:
-            caption_text, additional_text = prepare_media_text(text)
+            caption_text, additional_text = prepare_media_text(cleaned_text)
             
             if media_type.lower() == "photo":
                 await bot.send_photo(
@@ -149,9 +155,9 @@ async def publish_post_immediately(bot: Bot, post_id: int) -> bool:
                 )
         else:
             await bot.send_message(
-                chat_id, 
-                text or "Пост без текста", 
-                parse_mode=parse_mode, 
+                chat_id,
+                cleaned_text or "Пост без текста",
+                parse_mode=parse_mode,
                 reply_markup=markup
             )
         
